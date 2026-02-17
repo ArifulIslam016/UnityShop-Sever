@@ -10,7 +10,7 @@ router.get('/', async (req, res) => {
         res.status(500).send(error);
     }
 });
-
+// User create api
 router.post('/', async (req, res) => {
     try {
         const newUser = req.body;
