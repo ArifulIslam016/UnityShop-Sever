@@ -44,7 +44,7 @@ async function run() {
     app.use("/contact", contactRoutes);
     app.use("/home", homeRoutes);
     app.use("/users", usersRoutes);
-
+    app.use("/payment", require("./routes/payment")); 
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
     });
