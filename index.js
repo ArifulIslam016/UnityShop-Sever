@@ -33,6 +33,7 @@ const contactRoutes = require("./routes/contact");
 const homeRoutes = require("./routes/home");
 const usersRoutes = require("./routes/users");
 const productRoutes = require("./routes/product");
+const catRoutes = require("./routes/cart");
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -47,6 +48,7 @@ async function run() {
     app.use("/users", usersRoutes);
     app.use("/payment", require("./routes/payment")); 
     app.use("/product", productRoutes);
+    app.use("/cart",catRoutes);
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
     });
