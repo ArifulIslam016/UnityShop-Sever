@@ -79,6 +79,7 @@ router.post("/", async (req, res) => {
       originalPrice: Number(productData.originalPrice),
       rating: Number(productData.rating || 0),
       reviews: Number(productData.reviews || 0),
+      stock: Number(productData.stock || 0),
       createdAt: new Date(),
     };
 
