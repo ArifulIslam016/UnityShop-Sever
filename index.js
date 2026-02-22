@@ -33,6 +33,7 @@ const contactRoutes = require("./routes/contact");
 const homeRoutes = require("./routes/home");
 const usersRoutes = require("./routes/users");
 const productRoutes = require("./routes/product");
+const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 async function run() {
   try {
@@ -49,6 +50,7 @@ async function run() {
     app.use("/auth", authRoutes);
     app.use("/payment", require("./routes/payment"));
     app.use("/product", productRoutes);
+    app.use("/cart",catRoutes);
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
     });
