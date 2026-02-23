@@ -6,20 +6,48 @@ const router = express.Router();
 const DB_NAME = "UnityShopDB";
 const COLLECTION_NAME = "products";
 
-// Get all products with optional category filtering
+// Get all categories with product counts
+router.get("/categories", async (req, res) => {
+  try {
+    const categories = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .aggregate([
+        { $group: { _id: "$category", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray();
+
+    const result = categories.map((c) => ({
+      name: c._id,
+      count: c.count,
+    }));
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch categories" });
+  }
+});
+
+// Get all products with optional category and seller email filtering
 router.get("/", async (req, res) => {
   try {
-    const { category } = req.query;
+    const { category, sellerEmail } = req.query;
     let query = {};
 
     if (category) {
       query.category = category;
     }
 
+    if (sellerEmail) {
+      query.sellerEmail = sellerEmail;
+    }
+
     const products = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .find(query)
+      .sort({ createdAt: -1 })
       .toArray();
 
     res.send(products);

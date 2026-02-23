@@ -3,6 +3,8 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 5000;
+const cors = require('cors');
+require("dotenv").config();
 
 // const aboutRoutes = require("./routes/about");
 // const contactRoutes = require("./routes/contact");
@@ -35,6 +37,7 @@ const usersRoutes = require("./routes/users");
 const productRoutes = require("./routes/product");
 const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
+const ordersRoutes = require("./routes/orders");
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -49,6 +52,8 @@ async function run() {
     app.use("/users", usersRoutes);
     app.use("/auth", authRoutes);
     app.use("/payment", require("./routes/payment"));
+    app.use("/products", productRoutes);
+    app.use("/orders", ordersRoutes);
     app.use("/product", productRoutes);
     app.use("/cart",catRoutes);
     app.listen(port, () => {
