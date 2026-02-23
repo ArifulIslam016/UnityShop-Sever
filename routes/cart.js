@@ -18,7 +18,9 @@ router.get('/:userId', async (req, res) => {
     }
 })
 // Add api for add to cart of increase qualtity.
-/**Note for post api,, quantity negetive number (-)    is less the quantity and  quantity positive value(+) is increase quantity*/
+/**Note for post api,, quantity negetive number (-)   
+ *  is less the quantity and  quantity positive value(+) is increase quantity
+ * when quantity is less then 1 the minus (-) button  will be disabled*/
 router.post('/add', async (req, res) => {
   const { userId, productId, quantity } = req.body;
 
