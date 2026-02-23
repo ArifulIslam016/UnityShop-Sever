@@ -44,24 +44,165 @@ router.post("/register", async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Generate a one-time login token for email verification
+    const loginToken = crypto.randomBytes(32).toString("hex");
+    const loginTokenHash = crypto
+      .createHash("sha256")
+      .update(loginToken)
+      .digest("hex");
+    const loginTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
     // Create user
     const newUser = {
       name,
       email,
       password: hashedPassword,
       role: "user",
+      emailVerified: false,
+      loginToken: loginTokenHash,
+      loginTokenExpiry,
       createdAt: new Date(),
     };
 
     const result = await usersCollection.insertOne(newUser);
 
+    // Send welcome email with auto-login link
+    const frontendUrl = process.env.SITE_DOMAIN || "http://localhost:3000";
+    const verifyUrl = `${frontendUrl}/verify-email?token=${loginToken}&email=${encodeURIComponent(email)}`;
+
+    try {
+      const transporter = createTransporter();
+      const mailOptions = {
+        from: `"UnityShop" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: "Welcome to UnityShop — Verify & Login",
+        html: `
+          <div style="max-width: 600px; margin: 0 auto; font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; padding: 0;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #6366f1, #4f46e5); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
+              <h1 style="color: #fff; margin: 0; font-size: 28px; letter-spacing: 1px;">🛍️ UnityShop</h1>
+              <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Welcome to your favorite shopping destination!</p>
+            </div>
+
+            <!-- Body -->
+            <div style="background: #ffffff; padding: 40px 30px; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0;">
+              <h2 style="color: #1e293b; margin: 0 0 16px; font-size: 22px;">Welcome, ${name}! 🎉</h2>
+              <p style="color: #475569; font-size: 15px; line-height: 1.7; margin: 0 0 8px;">
+                Your account has been created successfully.
+              </p>
+              <p style="color: #475569; font-size: 15px; line-height: 1.7; margin: 0 0 24px;">
+                Click the button below to verify your email and log in automatically:
+              </p>
+
+              <!-- CTA Button -->
+              <div style="text-align: center; margin: 32px 0;">
+                <a href="${verifyUrl}" 
+                   style="display: inline-block; background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; text-decoration: none; padding: 14px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 14px rgba(99,102,241,0.4);">
+                  Verify & Login
+                </a>
+              </div>
+
+              <!-- Info box -->
+              <div style="background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 16px; margin: 24px 0;">
+                <p style="color: #3730a3; font-size: 13px; margin: 0; line-height: 1.6;">
+                  ⏰ This link will expire in <strong>24 hours</strong>.<br>
+                  🔗 This is a one-time login link for your first sign-in.
+                </p>
+              </div>
+
+              <p style="color: #94a3b8; font-size: 12px; margin: 24px 0 0; line-height: 1.6;">
+                Can't click the button? Copy and paste this link:<br>
+                <a href="${verifyUrl}" style="color: #6366f1; word-break: break-all;">${verifyUrl}</a>
+              </p>
+            </div>
+
+            <!-- Footer -->
+            <div style="background: #1e293b; padding: 24px 30px; text-align: center; border-radius: 0 0 12px 12px;">
+              <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+                &copy; ${new Date().getFullYear()} UnityShop. All rights reserved.
+              </p>
+            </div>
+          </div>
+        `,
+      };
+
+      await transporter.sendMail(mailOptions);
+    } catch (emailError) {
+      console.error("Failed to send welcome email:", emailError);
+      // Registration still succeeds even if email fails
+    }
+
     res.status(201).json({
-      message: "User registered successfully",
+      message: "Registration successful! Check your email for the login link.",
       userId: result.insertedId,
+      emailSent: true,
     });
   } catch (error) {
     console.error("Register error:", error);
     res.status(500).json({ message: "Server error during registration" });
+  }
+});
+
+// Verify Email — one-time auto-login from email link (first-time only)
+router.post("/verify-email", async (req, res) => {
+  try {
+    const { email, token } = req.body;
+
+    if (!email || !token) {
+      return res.status(400).json({ message: "Email and token are required" });
+    }
+
+    const db = req.dbclient.db("UnityShopDB");
+    const usersCollection = db.collection("users");
+
+    // Hash the token for comparison
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    // Find user with valid login token
+    const user = await usersCollection.findOne({
+      email,
+      loginToken: tokenHash,
+      loginTokenExpiry: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res
+        .status(400)
+        .json({ message: "Invalid or expired verification link." });
+    }
+
+    // Mark email as verified and remove the login token (one-time use)
+    await usersCollection.updateOne(
+      { _id: user._id },
+      {
+        $set: { emailVerified: true },
+        $unset: { loginToken: "", loginTokenExpiry: "" },
+      },
+    );
+
+    // Generate JWT token (same as login)
+    const jwtToken = jwt.sign(
+      { userId: user._id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "7d" },
+    );
+
+    // Send user data (without password)
+    const {
+      password: _,
+      loginToken: _t,
+      loginTokenExpiry: _e,
+      ...userWithoutSensitive
+    } = user;
+
+    res.json({
+      message: "Email verified! You are now logged in.",
+      user: { ...userWithoutSensitive, emailVerified: true },
+      token: jwtToken,
+    });
+  } catch (error) {
+    console.error("Verify email error:", error);
+    res.status(500).json({ message: "Server error during verification" });
   }
 });
 

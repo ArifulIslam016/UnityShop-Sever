@@ -1,15 +1,17 @@
 const express = require('express');
 const router = express.Router();
-require('dotenv').config();
-const crypto = require('crypto');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+require("dotenv").config();
+const crypto = require("crypto");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 // app.use(express.static("public"));
 
 function generateTracingId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-router.post('/create-checkout-session', async (req, res) => {
+const YOUR_DOMAIN = "http://localhost:5173";
+
+router.post("/create-checkout-session", async (req, res) => {
   const {
     price,
     productId,
@@ -54,12 +56,12 @@ router.post('/create-checkout-session', async (req, res) => {
   res.send({ url: session.url });
 });
 
-router.patch('/retrivedsessionAfterPayment', async (req, res) => {
+router.patch("/retrivedsessionAfterPayment", async (req, res) => {
   const { session_id } = req.query;
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('retrivedsessionAfterPayment/:', session);
+    console.log("retrivedsessionAfterPayment/:", session);
     const amountpaid = session.amount_total / 100;
     const customerEmail = session.customer_email;
     const CustomerName = session.customer_details.name;
@@ -71,22 +73,32 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
     const paymentStatus = session.payment_status;
     const cancelUrl = session.cancel_url;
     const IsExist = await req.dbclient
-      .db('UnityShopDB')
-      .collection('paidOrders')
+      .db("UnityShopDB")
+      .collection("paidOrders")
       .findOne({ TransitionId: paymentintent });
     if (IsExist) {
-      return res.status(200).json({ message: 'Order already processed.' });
+      return res.status(200).json({ message: "Order already processed." });
     }
 
+    const orderData = {
+      amountPaid: amountpaid,
+      customerEmail,
+      customerName: CustomerName,
+      transitionId: paymentintent,
+      productId: metadata.productId,
+      productName: metadata.productName,
+      sellerName: metadata.sellerName,
+      sellerEmail: metadata.sellerEmail,
+      quantity: Number(metadata.paidAmount) / amountpaid || 1,
+      paymentStatus,
+      status: "New",
+      createdAt: new Date(),
+    };
+
     const result = await req.dbclient
-      .db('UnityShopDB')
-      .collection('paidOrders')
-      .insertOne({
-        amountpaid,
-        customerEmail,
-        CustomerName,
-        TransitionId: paymentintent,
-      });
+      .db("UnityShopDB")
+      .collection("paidOrders")
+      .insertOne(orderData);
     res.send({
       status: session.status,
       payment_status: session.payment_status,
