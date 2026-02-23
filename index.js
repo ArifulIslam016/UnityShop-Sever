@@ -3,6 +3,8 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 5000;
+const cors = require('cors');
+require("dotenv").config();
 
 // const aboutRoutes = require("./routes/about");
 // const contactRoutes = require("./routes/contact");
@@ -33,6 +35,7 @@ const contactRoutes = require("./routes/contact");
 const homeRoutes = require("./routes/home");
 const usersRoutes = require("./routes/users");
 const productRoutes = require("./routes/product");
+const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 async function run() {
@@ -51,6 +54,8 @@ async function run() {
     app.use("/payment", require("./routes/payment"));
     app.use("/products", productRoutes);
     app.use("/orders", ordersRoutes);
+    app.use("/product", productRoutes);
+    app.use("/cart",catRoutes);
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
     });

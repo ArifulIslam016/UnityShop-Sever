@@ -1,4 +1,4 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
 require("dotenv").config();
 const crypto = require("crypto");
@@ -6,7 +6,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 // app.use(express.static("public"));
 
 function generateTracingId() {
-  return crypto.randomBytes(16).toString("hex");
+  return crypto.randomBytes(16).toString('hex');
 }
 
 const YOUR_DOMAIN = "http://localhost:5173";
@@ -35,7 +35,7 @@ router.post("/create-checkout-session", async (req, res) => {
       {
         // Provide the exact Price ID (for example, price_1234) of the product you want to sell
         price_data: {
-          currency: "USD",
+          currency: 'USD',
           unit_amount: parseInt(price * 100),
           product_data: {
             name: productName,
@@ -48,7 +48,7 @@ router.post("/create-checkout-session", async (req, res) => {
     customer_email: userEmail,
     metadata: metadataObject,
 
-    mode: "payment",
+    mode: 'payment',
     success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.SITE_DOMAIN}/payment-cancel`,
   });
