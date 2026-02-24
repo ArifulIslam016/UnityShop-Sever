@@ -29,6 +29,239 @@ router.get("/categories", async (req, res) => {
   }
 });
 
+// Get recommended / featured products for homepage
+// Supports: ?sort=recommended|latest|top-rated&limit=20
+router.get("/recommended", async (req, res) => {
+  try {
+    const { sort = "recommended", limit = "20" } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 20, 50);
+
+    let sortOption = {};
+    if (sort === "latest") {
+      sortOption = { createdAt: -1 };
+    } else if (sort === "top-rated") {
+      sortOption = { rating: -1, reviews: -1 };
+    } else {
+      // "recommended" – mix of rating + reviews (most popular)
+      sortOption = { rating: -1, reviews: -1, createdAt: -1 };
+    }
+
+    const products = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .find({})
+      .sort(sortOption)
+      .limit(limitNum)
+      .toArray();
+
+    res.send(products);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch recommended products" });
+  }
+});
+
+// Get flash deal products (products with significant discounts)
+router.get("/flash-deals", async (req, res) => {
+  try {
+    const { limit = "10" } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 10, 20);
+
+    const products = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .find({
+        originalPrice: { $exists: true, $gt: 0 },
+        $expr: { $lt: ["$price", "$originalPrice"] },
+      })
+      .sort({ rating: -1 })
+      .limit(limitNum)
+      .toArray();
+
+    // Add discount percentage to each product
+    const result = products.map((p) => ({
+      ...p,
+      discount: Math.round(
+        ((p.originalPrice - p.price) / p.originalPrice) * 100,
+      ),
+    }));
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch flash deals" });
+  }
+});
+
+// Get new arrival products
+router.get("/new-arrivals", async (req, res) => {
+  try {
+    const { limit = "10" } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 10, 20);
+
+    const products = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(limitNum)
+      .toArray();
+
+    res.send(products);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch new arrivals" });
+  }
+});
+
+// Get unique brands from products
+router.get("/brands", async (req, res) => {
+  try {
+    const brands = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .aggregate([
+        { $match: { brand: { $exists: true, $ne: "" } } },
+        {
+          $group: {
+            _id: "$brand",
+            count: { $sum: 1 },
+            image: { $first: "$image" },
+          },
+        },
+        { $sort: { count: -1 } },
+        { $limit: 12 },
+      ])
+      .toArray();
+
+    const result = brands.map((b) => ({
+      name: b._id,
+      count: b.count,
+      image: b.image,
+    }));
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch brands" });
+  }
+});
+
+// Search products with query, category, sort, pagination, price & rating filters
+router.get("/search", async (req, res) => {
+  try {
+    const {
+      q = "",
+      category = "",
+      sort = "recommended",
+      page = "1",
+      limit = "24",
+      priceMin = "",
+      priceMax = "",
+      rating = "0",
+    } = req.query;
+
+    const pageNum = Math.max(parseInt(page) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit) || 24, 1), 60);
+    const skip = (pageNum - 1) * limitNum;
+    const ratingNum = parseFloat(rating) || 0;
+
+    // Build match query
+    const matchQuery = {};
+
+    // Fuzzy text search — split query into words and match ANY word
+    // across name, description, brand, category, tags, badge
+    if (q && q.trim()) {
+      const words = q.trim().split(/\s+/).filter(Boolean);
+      if (words.length === 1) {
+        // Single word — match anywhere
+        const rx = words[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        matchQuery.$or = [
+          { name: { $regex: rx, $options: "i" } },
+          { description: { $regex: rx, $options: "i" } },
+          { brand: { $regex: rx, $options: "i" } },
+          { category: { $regex: rx, $options: "i" } },
+          { tags: { $regex: rx, $options: "i" } },
+          { badge: { $regex: rx, $options: "i" } },
+        ];
+      } else {
+        // Multiple words — each word must match in at least one field (AND of ORs)
+        matchQuery.$and = words.map((w) => {
+          const rx = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return {
+            $or: [
+              { name: { $regex: rx, $options: "i" } },
+              { description: { $regex: rx, $options: "i" } },
+              { brand: { $regex: rx, $options: "i" } },
+              { category: { $regex: rx, $options: "i" } },
+              { tags: { $regex: rx, $options: "i" } },
+              { badge: { $regex: rx, $options: "i" } },
+            ],
+          };
+        });
+      }
+    }
+
+    // Category filter (case-insensitive)
+    if (category && category.trim()) {
+      matchQuery.category = { $regex: `^${category.trim()}$`, $options: "i" };
+    }
+
+    // Price filters
+    if (priceMin || priceMax) {
+      matchQuery.price = {};
+      if (priceMin) matchQuery.price.$gte = parseFloat(priceMin);
+      if (priceMax) matchQuery.price.$lte = parseFloat(priceMax);
+      if (Object.keys(matchQuery.price).length === 0) delete matchQuery.price;
+    }
+
+    // Rating filter
+    if (ratingNum > 0) {
+      matchQuery.rating = { $gte: ratingNum };
+    }
+
+    // Sort options
+    let sortOption = {};
+    switch (sort) {
+      case "price-asc":
+        sortOption = { price: 1 };
+        break;
+      case "price-desc":
+        sortOption = { price: -1 };
+        break;
+      case "newest":
+        sortOption = { createdAt: -1 };
+        break;
+      case "rating":
+        sortOption = { rating: -1, reviews: -1 };
+        break;
+      default:
+        // recommended
+        sortOption = { rating: -1, reviews: -1, createdAt: -1 };
+    }
+
+    const collection = req.dbclient.db(DB_NAME).collection(COLLECTION_NAME);
+
+    // Get total count and paginated results in parallel
+    const [totalCount, products] = await Promise.all([
+      collection.countDocuments(matchQuery),
+      collection
+        .find(matchQuery)
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limitNum)
+        .toArray(),
+    ]);
+
+    res.send({
+      products,
+      total: totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    res.status(500).send({ error: "Failed to search products" });
+  }
+});
+
 // Get all products with optional category and seller email filtering
 router.get("/", async (req, res) => {
   try {
