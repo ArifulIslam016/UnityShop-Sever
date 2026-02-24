@@ -258,6 +258,67 @@ router.get("/platform-stats", async (req, res) => {
   }
 });
 
+// Get admin monthly stats (last 12 months of orders + user registrations)
+router.get("/admin-monthly-stats", async (req, res) => {
+  try {
+    const db = req.dbclient.db(DB_NAME);
+
+    // Build last 12 months labels
+    const months = [];
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({
+        year: d.getFullYear(),
+        month: d.getMonth(), // 0-indexed
+        label: d.toLocaleDateString("en-US", { month: "short" }),
+        start: new Date(d.getFullYear(), d.getMonth(), 1),
+        end: new Date(d.getFullYear(), d.getMonth() + 1, 1),
+      });
+    }
+
+    // Get all orders
+    const orders = await db.collection(ORDERS_COLLECTION).find().toArray();
+
+    // Get all users
+    const users = await db
+      .collection("users")
+      .find({}, { projection: { createdAt: 1, role: 1 } })
+      .toArray();
+
+    const monthlyData = months.map((m) => {
+      const monthOrders = orders.filter((o) => {
+        const d = new Date(o.createdAt);
+        return d >= m.start && d < m.end;
+      });
+      const monthUsers = users.filter((u) => {
+        const d = new Date(u.createdAt);
+        return d >= m.start && d < m.end;
+      });
+      const monthSellers = users.filter((u) => {
+        const d = new Date(u.createdAt);
+        return d >= m.start && d < m.end && u.role === "seller";
+      });
+
+      return {
+        label: m.label,
+        orders: monthOrders.length,
+        revenue: monthOrders.reduce(
+          (sum, o) => sum + (Number(o.amountPaid) || Number(o.amountpaid) || 0),
+          0,
+        ),
+        newUsers: monthUsers.length,
+        newSellers: monthSellers.length,
+      };
+    });
+
+    res.send(monthlyData);
+  } catch (error) {
+    console.error("Failed to fetch admin monthly stats:", error);
+    res.status(500).send({ error: "Failed to fetch admin monthly stats" });
+  }
+});
+
 // Update order status
 router.patch("/:id", async (req, res) => {
   try {
