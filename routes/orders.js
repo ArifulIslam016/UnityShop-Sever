@@ -325,10 +325,52 @@ router.patch("/:id", async (req, res) => {
     const id = req.params.id;
     const { status } = req.body;
 
-    const result = await req.dbclient
-      .db(DB_NAME)
+    const db = req.dbclient.db(DB_NAME);
+
+    // Get the order first so we can notify the customer
+    const order = await db
+      .collection(ORDERS_COLLECTION)
+      .findOne({ _id: new ObjectId(id) });
+
+    const result = await db
       .collection(ORDERS_COLLECTION)
       .updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+
+    // Send notification to the buyer about the status update
+    if (order && req.io) {
+      const buyerEmail = order.customerEmail;
+      if (buyerEmail) {
+        const notification = {
+          email: buyerEmail,
+          type: "order_status",
+          title: `Order ${status}`,
+          message: `Your order for ${order.productName || "your item"} has been updated to "${status}".`,
+          meta: { orderId: id, status },
+          read: false,
+          createdAt: new Date(),
+        };
+
+        await db.collection("notifications").insertOne(notification);
+        req.io.to(buyerEmail.toLowerCase()).emit("notification", notification);
+      }
+
+      // Also notify seller if status is relevant (e.g., Delivered)
+      const sellerEmail = order.sellerEmail;
+      if (sellerEmail && (status === "Delivered" || status === "Cancelled")) {
+        const sellerNotif = {
+          email: sellerEmail,
+          type: "order_status",
+          title: `Order ${status}`,
+          message: `Order for ${order.productName || "an item"} from ${order.customerName || order.customerEmail} is now "${status}".`,
+          meta: { orderId: id, status },
+          read: false,
+          createdAt: new Date(),
+        };
+
+        await db.collection("notifications").insertOne(sellerNotif);
+        req.io.to(sellerEmail.toLowerCase()).emit("notification", sellerNotif);
+      }
+    }
 
     res.send(result);
   } catch (error) {

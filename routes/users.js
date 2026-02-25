@@ -196,6 +196,22 @@ router.patch("/approve-seller/:email", async (req, res) => {
       },
     );
 
+    // Send notification to the user about approval
+    if (req.io) {
+      const notification = {
+        email,
+        type: "seller_approved",
+        title: "Seller Request Approved!",
+        message:
+          "Congratulations! Your seller request has been approved. You can now start selling on UnityShop.",
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(notification);
+      req.io.to(email.toLowerCase()).emit("notification", notification);
+    }
+
     res.json({ message: "Seller request approved!", user: result });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -234,6 +250,22 @@ router.patch("/reject-seller/:email", async (req, res) => {
         projection: { password: 0, resetToken: 0, resetTokenExpiry: 0 },
       },
     );
+
+    // Send notification to the user about rejection
+    if (req.io) {
+      const notification = {
+        email,
+        type: "seller_rejected",
+        title: "Seller Request Rejected",
+        message:
+          "Your seller request has been rejected. Please contact support for more details.",
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(notification);
+      req.io.to(email.toLowerCase()).emit("notification", notification);
+    }
 
     res.json({ message: "Seller request rejected.", user: result });
   } catch (error) {

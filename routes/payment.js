@@ -75,7 +75,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     const IsExist = await req.dbclient
       .db("UnityShopDB")
       .collection("paidOrders")
-      .findOne({ TransitionId: paymentintent });
+      .findOne({ transitionId: paymentintent }); // Fixed casing: transitionId
     if (IsExist) {
       return res.status(200).json({ message: "Order already processed." });
     }
@@ -89,7 +89,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       productName: metadata.productName,
       sellerName: metadata.sellerName,
       sellerEmail: metadata.sellerEmail,
-      quantity: Number(metadata.paidAmount) / amountpaid || 1,
+      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1, // Ensure number division
       paymentStatus,
       status: "New",
       createdAt: new Date(),
