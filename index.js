@@ -1,12 +1,29 @@
 const cors = require("cors");
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Initialize Socket.io
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Allow all origins
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
+  },
+});
 
 const { MongoClient, ServerApiVersion } = require("mongodb");
 app.use(cors());
 app.use(express.json());
+
+// Inject io into request object
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
 
 const uri = process.env.MONGODB_URL;
 
@@ -69,12 +86,31 @@ app.use("/products", productRoutes);
 app.use("/orders", ordersRoutes);
 app.use("/product", productRoutes);
 app.use("/cart", catRoutes);
+app.use("/notifications", require("./routes/notifications"));
 
-// For local development only
+
 if (process.env.NODE_ENV !== "production") {
-  app.listen(port, () => {
+  server.listen(port, () => {
     console.log(`Server listening on port ${port}`);
   });
 }
 
+// Socket.io connection logging
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id);
+  
+  socket.on("join", (room) => {
+    if (room) {
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined room: ${room}`);
+    }
+  });
+
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
+
 module.exports = app;
+
