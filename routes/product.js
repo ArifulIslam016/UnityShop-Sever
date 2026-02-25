@@ -355,24 +355,92 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Update product details
+//  Update product details
 router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
+    // const db = req.dbclient.db(DB_NAME);
     const updates = { $set: req.body };
+
+    
+
+    // Get product first to find sellerEmail for notifications
+    const product = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .findOne({ _id: new ObjectId(id) });
 
     const result = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .updateOne({ _id: new ObjectId(id) }, updates);
 
+    // Notification Logic: Product Approval
+    if (
+      product &&
+      req.body.status &&
+      (req.body.status === "approved" || req.body.status === "rejected")
+    ) {
+      const isApproved = req.body.status === "approved";
+      const notif = {
+        email: product.sellerEmail,
+        type: isApproved ? "product_approved" : "product_rejected",
+        title: isApproved ? "Product Approved!" : "Product Rejected",
+        message: isApproved
+          ? `Your product "${product.name}" is now live!`
+          : `Your product "${product.name}" was rejected. Please update details.`,
+        read: false,
+        createdAt: new Date(),
+      };
+
+      const notifCol = db.collection("notifications");
+      await notifCol.insertOne(notif);
+      if (req.io)
+        req.io
+          .to(product.sellerEmail.toLowerCase())
+          .emit("notification", notif);
+    }
+
+    // If product status changed to approved/rejected, notify the seller
+    if (product && req.io && req.body.status) {
+      const sellerEmail = product.sellerEmail;
+      const newStatus = req.body.status;
+
+      if (
+        sellerEmail &&
+        (newStatus === "approved" || newStatus === "rejected")
+      ) {
+        const notification = {
+          email: sellerEmail,
+          type:
+            newStatus === "approved" ? "product_approved" : "product_rejected",
+          title:
+            newStatus === "approved" ? "Product Approved!" : "Product Rejected",
+          message:
+            newStatus === "approved"
+              ? `Your product "${product.name}" has been approved and is now live.`
+              : `Your product "${product.name}" has been rejected. Please review and resubmit.`,
+          meta: { productId: id, productName: product.name },
+          read: false,
+          createdAt: new Date(),
+        };
+
+        await db.collection("notifications").insertOne(notification);
+        req.io.to(sellerEmail.toLowerCase()).emit("notification", notification);
+      }
+    }
+
     res.send(result);
   } catch (error) {
+    console.error(error);
     res.status(500).send({ error: "Failed to update product" });
   }
 });
 
 // Delete product
+
+
+
 router.delete("/:id", async (req, res) => {
   try {
     const id = req.params.id;
