@@ -50,7 +50,6 @@ router.get("/profile/:email", async (req, res) => {
   }
 });
 
-// ===== Profile API — Update profile by email =====
 router.patch("/profile/:email", async (req, res) => {
   try {
     const email = req.params.email;

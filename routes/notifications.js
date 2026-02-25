@@ -64,6 +64,11 @@ router.post("/test-emit", async (req, res) => {
 
   res.json({ success: true, emittedTo: email.toLowerCase() });
 });
+    console.error(error);
+    res.status(500).json({ error: "Failed to create notification" });
+  }
+});
+
 // ─── Get notifications for a user ──────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -174,4 +179,22 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ─── Broadcast Coupon ────────────────────────────────────────────────────────
+router.post("/broadcast-coupon", (req, res) => {
+  const { code, discount } = req.body;
+  const notification = {
+    type: "coupon",
+    title: "New Coupon Available!",
+    message: `Use code ${code || "SAVE10"} for ${discount || "10%"} off!`,
+    read: false,
+    createdAt: new Date(),
+  };
+
+  // Note: We are emitting to all connected clients
+  if (req.io) req.io.emit("notification", notification);
+
+  res.json({ success: true, message: "Coupon broadcasted" });
+});
+
+// Export router
 module.exports = router;

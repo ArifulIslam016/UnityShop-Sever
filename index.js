@@ -30,8 +30,14 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 app.use(cors());
 app.use(express.json());
 
+// Inject io into request object
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
 const uri = process.env.MONGODB_URL;
-console.log(uri);
+
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
@@ -40,11 +46,33 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-app.use((req, res, next) => {
-  req.dbclient = client;
-  next();
+
+// Cache the connection promise for serverless (Vercel)
+let connectionPromise = null;
+
+async function connectToDatabase() {
+  if (!connectionPromise) {
+    connectionPromise = client.connect().then(() => {
+      console.log("Successfully connected to MongoDB!");
+      return client;
+    });
+  }
+  return connectionPromise;
+}
+
+// Middleware: ensure MongoDB is connected before handling any request
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    req.dbclient = client;
+    next();
+  } catch (error) {
+    console.error("MongoDB connection error:", error);
+    res.status(500).json({ error: "Database connection failed" });
+  }
 });
 
+// Import routes
 const aboutRoutes = require("./routes/about");
 const contactRoutes = require("./routes/contact");
 const homeRoutes = require("./routes/home");
@@ -53,13 +81,6 @@ const productRoutes = require("./routes/product");
 const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
-async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-    app.get("/", (req, res) => {
-      res.send("Hello World!");
-    });
 
     app.use("/about", aboutRoutes);
     app.use("/contact", contactRoutes);
@@ -103,6 +124,23 @@ async function run() {
     // await client.close();
   }
 }
-run().catch(console.dir);
+
+// Socket.io connection logging
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id);
+  
+  socket.on("join", (room) => {
+    if (room) {
+      socket.join(room);
+      console.log(`Socket ${socket.id} joined room: ${room}`);
+    }
+  });
+
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
 
 module.exports = app;
+
