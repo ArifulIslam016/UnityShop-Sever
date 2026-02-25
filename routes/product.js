@@ -361,13 +361,46 @@ router.patch("/:id", async (req, res) => {
     const id = req.params.id;
     const updates = { $set: req.body };
 
-    const result = await req.dbclient
-      .db(DB_NAME)
-      .collection(COLLECTION_NAME)
-      .updateOne({ _id: new ObjectId(id) }, updates);
+    const db = req.dbclient.db(DB_NAME);
+    const collection = db.collection(COLLECTION_NAME);
+
+    // Get product first to find sellerEmail for notifications
+    const product = await collection.findOne({ _id: new ObjectId(id) });
+
+    const result = await collection.updateOne(
+      { _id: new ObjectId(id) },
+      updates,
+    );
+
+    // Notification Logic: Product Approval
+    if (
+      product &&
+      req.body.status &&
+      (req.body.status === "approved" || req.body.status === "rejected")
+    ) {
+      const isApproved = req.body.status === "approved";
+      const notif = {
+        email: product.sellerEmail,
+        type: isApproved ? "product_approved" : "product_rejected",
+        title: isApproved ? "Product Approved!" : "Product Rejected",
+        message: isApproved
+          ? `Your product "${product.name}" is now live!`
+          : `Your product "${product.name}" was rejected. Please update details.`,
+        read: false,
+        createdAt: new Date(),
+      };
+
+      const notifCol = db.collection("notifications");
+      await notifCol.insertOne(notif);
+      if (req.io)
+        req.io
+          .to(product.sellerEmail.toLowerCase())
+          .emit("notification", notif);
+    }
 
     res.send(result);
   } catch (error) {
+    console.error(error);
     res.status(500).send({ error: "Failed to update product" });
   }
 });
