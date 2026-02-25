@@ -1,10 +1,10 @@
-const cors = require("cors");
 require("dotenv").config();
 const express = require("express");
 const http = require("http"); // Import http
 const { Server } = require("socket.io"); // Import socket.io
 const app = express();
 const port = process.env.PORT || 5000;
+const cors = require("cors");
 
 // Initialize Socket.io
 const server = http.createServer(app);
@@ -82,53 +82,30 @@ const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 
-    app.use("/about", aboutRoutes);
-    app.use("/contact", contactRoutes);
-    app.use("/home", homeRoutes);
-    app.use("/users", usersRoutes);
-    app.use("/auth", authRoutes);
-    app.use("/payment", require("./routes/payment"));
-    app.use("/products", productRoutes);
-    app.use("/orders", ordersRoutes);
-    app.use("/product", productRoutes);
-    app.use("/cart", catRoutes);
-    app.use("/notifications", require("./routes/notifications"));
+app.get("/", (req, res) => {
+  res.send("Welcome to the UnityShop API!");
+});
+app.use("/about", aboutRoutes);
+app.use("/contact", contactRoutes);
+app.use("/home", homeRoutes);
+app.use("/users", usersRoutes);
+app.use("/auth", authRoutes);
+app.use("/payment", require("./routes/payment"));
+app.use("/products", productRoutes);
+app.use("/orders", ordersRoutes);
+app.use("/product", productRoutes);
+app.use("/cart", catRoutes);
+app.use("/notifications", require("./routes/notifications"));
 
-    // Use server.listen instead of app.listen
-    server.listen(port, () => {
-      console.log(`Example app listening on port ${port}`);
-    });
-
-    // Socket.io connection logging
-    io.on("connection", (socket) => {
-      console.log("Client connected:", socket.id);
-
-      socket.on("join", (room) => {
-        if (room) {
-          socket.join(room);
-          console.log(`Socket ${socket.id} joined room: ${room}`);
-        }
-      });
-
-      socket.on("disconnect", () => {
-        console.log("Client disconnected:", socket.id);
-      });
-    });
-
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
-  }
-}
+// Use server.listen instead of app.listen
+server.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
 
 // Socket.io connection logging
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
-  
+
   socket.on("join", (room) => {
     if (room) {
       socket.join(room);
@@ -136,11 +113,27 @@ io.on("connection", (socket) => {
     }
   });
 
-
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
 });
+
+// Socket.io connection logging
+// io.on("connection", (socket) => {
+//   console.log("Client connected:", socket.id);
+  
+//   socket.on("join", (room) => {
+//     if (room) {
+//       socket.join(room);
+//       console.log(`Socket ${socket.id} joined room: ${room}`);
+//     }
+//   });
+
+
+//   socket.on("disconnect", () => {
+//     console.log("Client disconnected:", socket.id);
+//   });
+// });
 
 module.exports = app;
 

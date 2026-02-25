@@ -355,31 +355,25 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Update product details
+//  Update product details
 router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
-    const db = req.dbclient.db(DB_NAME);
+    // const db = req.dbclient.db(DB_NAME);
     const updates = { $set: req.body };
 
-    // Get product before update so we can check for status change
-    const product = await db
+    
+
+    // Get product first to find sellerEmail for notifications
+    const product = await req.dbclient
+      .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .findOne({ _id: new ObjectId(id) });
 
-    const result = await db
+    const result = await req.dbclient
+      .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .updateOne({ _id: new ObjectId(id) }, updates);
-    const db = req.dbclient.db(DB_NAME);
-    const collection = db.collection(COLLECTION_NAME);
-
-    // Get product first to find sellerEmail for notifications
-    const product = await collection.findOne({ _id: new ObjectId(id) });
-
-    const result = await collection.updateOne(
-      { _id: new ObjectId(id) },
-      updates,
-    );
 
     // Notification Logic: Product Approval
     if (
@@ -444,6 +438,9 @@ router.patch("/:id", async (req, res) => {
 });
 
 // Delete product
+
+
+
 router.delete("/:id", async (req, res) => {
   try {
     const id = req.params.id;

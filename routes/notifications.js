@@ -64,11 +64,8 @@ router.post("/test-emit", async (req, res) => {
 
   res.json({ success: true, emittedTo: email.toLowerCase() });
 });
-    console.error(error);
-    res.status(500).json({ error: "Failed to create notification" });
-  }
-});
-
+    
+  
 // ─── Get notifications for a user ──────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
