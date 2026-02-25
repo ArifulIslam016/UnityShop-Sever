@@ -359,12 +359,46 @@ router.post("/", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
+    const db = req.dbclient.db(DB_NAME);
     const updates = { $set: req.body };
 
-    const result = await req.dbclient
-      .db(DB_NAME)
+    // Get product before update so we can check for status change
+    const product = await db
+      .collection(COLLECTION_NAME)
+      .findOne({ _id: new ObjectId(id) });
+
+    const result = await db
       .collection(COLLECTION_NAME)
       .updateOne({ _id: new ObjectId(id) }, updates);
+
+    // If product status changed to approved/rejected, notify the seller
+    if (product && req.io && req.body.status) {
+      const sellerEmail = product.sellerEmail;
+      const newStatus = req.body.status;
+
+      if (
+        sellerEmail &&
+        (newStatus === "approved" || newStatus === "rejected")
+      ) {
+        const notification = {
+          email: sellerEmail,
+          type:
+            newStatus === "approved" ? "product_approved" : "product_rejected",
+          title:
+            newStatus === "approved" ? "Product Approved!" : "Product Rejected",
+          message:
+            newStatus === "approved"
+              ? `Your product "${product.name}" has been approved and is now live.`
+              : `Your product "${product.name}" has been rejected. Please review and resubmit.`,
+          meta: { productId: id, productName: product.name },
+          read: false,
+          createdAt: new Date(),
+        };
+
+        await db.collection("notifications").insertOne(notification);
+        req.io.to(sellerEmail.toLowerCase()).emit("notification", notification);
+      }
+    }
 
     res.send(result);
   } catch (error) {

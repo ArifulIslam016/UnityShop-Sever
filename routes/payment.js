@@ -75,7 +75,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     const IsExist = await req.dbclient
       .db("UnityShopDB")
       .collection("paidOrders")
-      .findOne({ TransitionId: paymentintent });
+      .findOne({ transitionId: paymentintent }); // Fixed casing: transitionId
     if (IsExist) {
       return res.status(200).json({ message: "Order already processed." });
     }
@@ -89,7 +89,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       productName: metadata.productName,
       sellerName: metadata.sellerName,
       sellerEmail: metadata.sellerEmail,
-      quantity: Number(metadata.paidAmount) / amountpaid || 1,
+      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1, // Ensure number division
       paymentStatus,
       status: "New",
       createdAt: new Date(),
@@ -99,6 +99,54 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       .db("UnityShopDB")
       .collection("paidOrders")
       .insertOne(orderData);
+
+    // ─── Notification Logic ─────────────────────────────────────────────
+    if (req.io) {
+      // 1. Notify Buyer
+      const buyerNotification = {
+        email: customerEmail,
+        type: "payment_success",
+        title: "Payment Successful",
+        message: `You have successfully paid for ${metadata.productName}.`,
+        read: false,
+        createdAt: new Date(),
+      };
+
+      // Save to DB
+      await req.dbclient
+        .db("UnityShopDB")
+        .collection("notifications")
+        .insertOne(buyerNotification);
+
+      // Emit to Buyer's Room
+      req.io
+        .to(customerEmail.toLowerCase())
+        .emit("notification", buyerNotification);
+
+      // 2. Notify Seller
+      if (metadata.sellerEmail) {
+        const sellerNotification = {
+          email: metadata.sellerEmail,
+          type: "order_confirmed",
+          title: "New Order Received",
+          message: `You have a new order for ${metadata.productName} from ${CustomerName}.`,
+          read: false,
+          createdAt: new Date(),
+        };
+
+        // Save to DB
+        await req.dbclient
+          .db("UnityShopDB")
+          .collection("notifications")
+          .insertOne(sellerNotification);
+
+        // Emit to Seller's Room
+        req.io
+          .to(metadata.sellerEmail.toLowerCase())
+          .emit("notification", sellerNotification);
+      }
+    }
+
     res.send({
       status: session.status,
       payment_status: session.payment_status,
