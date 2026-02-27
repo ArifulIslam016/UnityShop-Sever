@@ -9,7 +9,6 @@ function generateTracingId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// const YOUR_DOMAIN = "http://localhost:5173";
 
 router.post("/create-checkout-session", async (req, res) => {
   const {
@@ -150,7 +149,6 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     }
 
 
-    // ──────────────────────────────────────────────────────────────────────────
 
     res.send({
       status: session.status,

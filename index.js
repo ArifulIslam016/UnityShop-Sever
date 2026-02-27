@@ -21,10 +21,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// const aboutRoutes = require("./routes/about");
-// const contactRoutes = require("./routes/contact");
-// const homeRoutes = require("./routes/home");
-// const usersRoutes = require("./routes/users");
+
 
 const { MongoClient, ServerApiVersion } = require("mongodb");
 app.use(cors());
@@ -96,6 +93,7 @@ app.use("/orders", ordersRoutes);
 app.use("/product", productRoutes);
 app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
+app.use("/upload", require("./routes/upload"));
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {
@@ -121,7 +119,7 @@ io.on("connection", (socket) => {
 // Socket.io connection logging
 // io.on("connection", (socket) => {
 //   console.log("Client connected:", socket.id);
-  
+
 //   socket.on("join", (room) => {
 //     if (room) {
 //       socket.join(room);
@@ -129,11 +127,9 @@ io.on("connection", (socket) => {
 //     }
 //   });
 
-
 //   socket.on("disconnect", () => {
 //     console.log("Client disconnected:", socket.id);
 //   });
 // });
 
 module.exports = app;
-
