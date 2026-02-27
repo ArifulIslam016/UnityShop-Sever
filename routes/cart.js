@@ -8,15 +8,45 @@ const COLLECTION_NAME = "carts";
 router.get("/:userId", async (req, res) => {
   const userId = req.params.userId;
   try {
-    const cart = await req.dbclient
+    const pipeline = [
+      { $match: { userId: new ObjectId(userId) } },
+      { $unwind: "$items" },
+      {
+        $lookup: {
+          from: "products",
+          localField: "items.productId",
+          foreignField: "_id",
+          as: "productDetails",
+        },
+      },
+      { $unwind: "$productDetails" },
+      {
+        $project: {
+          productId: "$items.productId",
+          quantity: "$items.quantity",
+          name: "$productDetails.name",
+          price: "$productDetails.price",
+          image: "$productDetails.image",
+          stock: "$productDetails.stock",
+          moq: "$productDetails.moq",
+          category: "$productDetails.category",
+          sellerId: "$productDetails.sellerId",
+          sellerName: "$productDetails.sellerName",
+          sellerEmail: "$productDetails.sellerEmail",
+          sellerVerified: "$productDetails.sellerVerified",
+        },
+      },
+    ];
+
+    const cartItems = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
-      .findOne({ userId: new ObjectId(userId) });
-    if (!cart) {
-      return res.status(404).send({ error: "Cart not found" });
-    }
-    res.send(cart);
+      .aggregate(pipeline)
+      .toArray();
+
+    res.send(cartItems);
   } catch (error) {
+    console.error("Cart Fetch Error:", error);
     res.status(500).send({ error: "Failed to fetch cart" });
   }
 });
@@ -98,6 +128,32 @@ router.delete("/remove", async (req, res) => {
     .updateOne(
       { userId: new ObjectId(userId) },
       { $pull: { items: { productId: new ObjectId(productId) } } },
+    );
+
+  res.send(result);
+});
+
+// Update item quantity directly (absolute value)
+router.put("/update", async (req, res) => {
+  const { userId, productId, quantity } = req.body;
+
+  if (quantity < 1) {
+    return res
+      .status(400)
+      .send({ error: "Quantity must be at least 1. Use remove instead." });
+  }
+
+  const result = await req.dbclient
+    .db(DB_NAME)
+    .collection(COLLECTION_NAME)
+    .updateOne(
+      {
+        userId: new ObjectId(userId),
+        "items.productId": new ObjectId(productId),
+      },
+      {
+        $set: { "items.$.quantity": quantity, updatedAt: new Date() },
+      },
     );
 
   res.send(result);
