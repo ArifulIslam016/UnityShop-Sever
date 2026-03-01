@@ -1,17 +1,17 @@
-require("dotenv").config();
-const express = require("express");
-const http = require("http"); // Import http
-const { Server } = require("socket.io"); // Import socket.io
+require('dotenv').config();
+const express = require('express');
+const http = require('http'); // Import http
+const { Server } = require('socket.io'); // Import socket.io
 const app = express();
 const port = process.env.PORT || 5000;
-const cors = require("cors");
+const cors = require('cors');
 
 // Initialize Socket.io
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for now
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
+    origin: '*', // Allow all origins for now
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
   },
 });
 
@@ -48,7 +48,7 @@ let connectionPromise = null;
 async function connectToDatabase() {
   if (!connectionPromise) {
     connectionPromise = client.connect().then(() => {
-      console.log("Successfully connected to MongoDB!");
+      console.log('Successfully connected to MongoDB!');
       return client;
     });
   }
@@ -62,24 +62,38 @@ app.use(async (req, res, next) => {
     req.dbclient = client;
     next();
   } catch (error) {
-    console.error("MongoDB connection error:", error);
-    res.status(500).json({ error: "Database connection failed" });
+    console.error('MongoDB connection error:', error);
+    res.status(500).json({ error: 'Database connection failed' });
   }
 });
 
 // Import routes
-const aboutRoutes = require("./routes/about");
-const contactRoutes = require("./routes/contact");
-const homeRoutes = require("./routes/home");
-const usersRoutes = require("./routes/users");
-const productRoutes = require("./routes/product");
-const catRoutes = require("./routes/cart");
-const authRoutes = require("./routes/auth");
-const ordersRoutes = require("./routes/orders");
+const aboutRoutes = require('./routes/about');
+const contactRoutes = require('./routes/contact');
+const homeRoutes = require('./routes/home');
+const usersRoutes = require('./routes/users');
+const productRoutes = require('./routes/product');
+const catRoutes = require('./routes/cart');
+const authRoutes = require('./routes/auth');
+const ordersRoutes = require('./routes/orders');
+const promoRoutes = require('./routes/promo');
 
-app.get("/", (req, res) => {
-  res.send("Welcome to the UnityShop API!");
+app.get('/', (req, res) => {
+  res.send('Welcome to the UnityShop API!');
 });
+app.use('/about', aboutRoutes);
+app.use('/contact', contactRoutes);
+app.use('/home', homeRoutes);
+app.use('/users', usersRoutes);
+app.use('/auth', authRoutes);
+app.use('/payment', require('./routes/payment'));
+app.use('/products', productRoutes);
+app.use('/orders', ordersRoutes);
+app.use('/product', productRoutes);
+app.use('/cart', catRoutes);
+app.use('/notifications', require('./routes/notifications'));
+app.use('/upload', require('./routes/upload'));
+app.use('/promo', promoRoutes);
 app.use("/about", aboutRoutes);
 app.use("/contact", contactRoutes);
 app.use("/home", homeRoutes);
@@ -100,18 +114,18 @@ server.listen(port, () => {
 });
 
 // Socket.io connection logging
-io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
+io.on('connection', socket => {
+  console.log('Client connected:', socket.id);
 
-  socket.on("join", (room) => {
+  socket.on('join', room => {
     if (room) {
       socket.join(room);
       console.log(`Socket ${socket.id} joined room: ${room}`);
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
   });
 });
 
