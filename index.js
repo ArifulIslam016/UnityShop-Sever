@@ -21,8 +21,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
-
 const { MongoClient, ServerApiVersion } = require("mongodb");
 app.use(cors());
 app.use(express.json());
@@ -94,6 +92,7 @@ app.use("/product", productRoutes);
 app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
+app.use("/reviews", require("./routes/reviews"));
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {
