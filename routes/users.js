@@ -50,7 +50,6 @@ router.get("/profile/:email", async (req, res) => {
   }
 });
 
-// ===== Profile API — Update profile by email =====
 router.patch("/profile/:email", async (req, res) => {
   try {
     const email = req.params.email;
@@ -197,6 +196,22 @@ router.patch("/approve-seller/:email", async (req, res) => {
       },
     );
 
+    // Send notification to the user about approval
+    if (req.io) {
+      const notification = {
+        email,
+        type: "seller_approved",
+        title: "Seller Request Approved!",
+        message:
+          "Congratulations! Your seller request has been approved. You can now start selling on UnityShop.",
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(notification);
+      req.io.to(email.toLowerCase()).emit("notification", notification);
+    }
+
     res.json({ message: "Seller request approved!", user: result });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -236,7 +251,72 @@ router.patch("/reject-seller/:email", async (req, res) => {
       },
     );
 
+    // Send notification to the user about rejection
+    if (req.io) {
+      const notification = {
+        email,
+        type: "seller_rejected",
+        title: "Seller Request Rejected",
+        message:
+          "Your seller request has been rejected. Please contact support for more details.",
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(notification);
+      req.io.to(email.toLowerCase()).emit("notification", notification);
+    }
+
     res.json({ message: "Seller request rejected.", user: result });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ===== Change User Role — Admin can change any user's role =====
+router.patch("/change-role/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { role } = req.body;
+
+    if (!role || !["user", "seller", "manager", "admin"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
+
+    const db = req.dbclient.db("UnityShopDB");
+    const usersCollection = db.collection("users");
+
+    const user = await usersCollection.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const updateFields = {
+      role,
+      updatedAt: new Date(),
+    };
+
+    // If demoting seller to user, clear seller request info
+    if (role === "user") {
+      updateFields.sellerRequest = null;
+    }
+
+    // If making someone a seller directly, mark as approved
+    if (role === "seller") {
+      updateFields.sellerRequest = "approved";
+      updateFields.sellerApprovedAt = new Date();
+    }
+
+    const result = await usersCollection.findOneAndUpdate(
+      { email },
+      { $set: updateFields },
+      {
+        returnDocument: "after",
+        projection: { password: 0, resetToken: 0, resetTokenExpiry: 0 },
+      },
+    );
+
+    res.json({ message: `User role changed to ${role}`, user: result });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }

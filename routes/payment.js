@@ -9,7 +9,6 @@ function generateTracingId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-const YOUR_DOMAIN = "http://localhost:5173";
 
 router.post("/create-checkout-session", async (req, res) => {
   const {
@@ -75,7 +74,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     const IsExist = await req.dbclient
       .db("UnityShopDB")
       .collection("paidOrders")
-      .findOne({ TransitionId: paymentintent });
+      .findOne({ transitionId: paymentintent }); // Fixed casing: transitionId
     if (IsExist) {
       return res.status(200).json({ message: "Order already processed." });
     }
@@ -89,7 +88,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       productName: metadata.productName,
       sellerName: metadata.sellerName,
       sellerEmail: metadata.sellerEmail,
-      quantity: Number(metadata.paidAmount) / amountpaid || 1,
+      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1, // Ensure number division
       paymentStatus,
       status: "New",
       createdAt: new Date(),
@@ -99,8 +98,61 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       .db("UnityShopDB")
       .collection("paidOrders")
       .insertOne(orderData);
+
+    // ─── Real-time Notifications ───────────────────────────────────────────────
+    const notifCollection = req.dbclient.db("UnityShopDB").collection("notifications");
+
+    // 1. Notify Customer: Payment Successful / Order Confirmed
+    if (customerEmail) {
+      const customerNotif = {
+        email: customerEmail, // Ensure this matches user's session email
+        type: "payment_success",
+        title: "Order Confirmed!",
+        message: `Payment successful for ${metadata.productName}. Amount: $${amountpaid}`,
+        read: false,
+        createdAt: new Date(),
+      };
+      
+      try {
+        await notifCollection.insertOne(customerNotif);
+        if (req.io) {
+            console.log(`Emitting payment_success to ${customerEmail.toLowerCase()}`);
+            req.io.to(customerEmail.toLowerCase()).emit("notification", customerNotif);
+        } else {
+            console.error("Socket.io instance not found on request object!");
+        }
+      } catch (err) {
+        console.error("Error sending customer notification:", err);
+      }
+    }
+
+    // 2. Notify Seller: New Order
+    if (metadata.sellerEmail) {
+      const sellerNotif = {
+        email: metadata.sellerEmail,
+        type: "order_confirmed",
+        title: "New Order Received!",
+        message: `Start packing! You sold ${metadata.productName} to ${CustomerName}.`,
+        read: false,
+        createdAt: new Date(),
+      };
+      
+      try {
+        await notifCollection.insertOne(sellerNotif);
+        if (req.io) {
+             console.log(`Emitting order_confirmed to ${metadata.sellerEmail.toLowerCase()}`);
+             req.io.to(metadata.sellerEmail.toLowerCase()).emit("notification", sellerNotif);
+        }
+      } catch (err) {
+        console.error("Error sending seller notification:", err);
+      }
+    }
+
+
+
     res.send({
       status: session.status,
+
       payment_status: session.payment_status,
       metadata: session.metadata,
       customer_email: session.customer_email,
