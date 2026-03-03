@@ -94,6 +94,11 @@ app.use("/product", productRoutes);
 app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
+app.use("/seller-requests", require("./routes/sellerRequests"));
+app.use("/group-buy", require("./routes/groupBuy"));
+
+
+
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {
