@@ -3,7 +3,7 @@ const express = require("express");
 const http = require("http"); // Import http
 const { Server } = require("socket.io"); // Import socket.io
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 5001;
 const cors = require("cors");
 
 // Initialize Socket.io
@@ -77,6 +77,8 @@ const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 const promoRoutes = require("./routes/promo");
+const aiRoutes = require("./routes/ai");
+const negotiationsRoutes = require("./routes/negotiations");
 
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
@@ -95,6 +97,8 @@ app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
 app.use("/promo", promoRoutes);
+app.use("/ai", aiRoutes);
+app.use("/negotiations", negotiationsRoutes);
 app.use("/reviews", require("./routes/reviews"));
 
 // Use server.listen instead of app.listen
