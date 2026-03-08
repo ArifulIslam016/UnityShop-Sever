@@ -94,6 +94,11 @@ app.use("/orders", ordersRoutes);
 app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
+app.use("/seller-requests", require("./routes/sellerRequests"));
+app.use("/group-buy", require("./routes/groupBuy"));
+
+
+
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
 
