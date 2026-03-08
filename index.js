@@ -96,6 +96,7 @@ app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
+app.use("/bids", require("./routes/bids"));
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {
