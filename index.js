@@ -21,8 +21,6 @@ app.use((req, res, next) => {
   next();
 });
 
-
-
 const { MongoClient, ServerApiVersion } = require("mongodb");
 app.use(cors());
 app.use(express.json());
@@ -78,10 +76,12 @@ const productRoutes = require("./routes/product");
 const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
+const promoRoutes = require("./routes/promo");
 
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
 });
+
 app.use("/about", aboutRoutes);
 app.use("/contact", contactRoutes);
 app.use("/home", homeRoutes);
@@ -89,8 +89,8 @@ app.use("/users", usersRoutes);
 app.use("/auth", authRoutes);
 app.use("/payment", require("./routes/payment"));
 app.use("/products", productRoutes);
-app.use("/orders", ordersRoutes);
 app.use("/product", productRoutes);
+app.use("/orders", ordersRoutes);
 app.use("/cart", catRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
@@ -99,6 +99,8 @@ app.use("/group-buy", require("./routes/groupBuy"));
 
 
 
+app.use("/promo", promoRoutes);
+app.use("/reviews", require("./routes/reviews"));
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {

@@ -342,6 +342,7 @@ router.post("/", async (req, res) => {
       reviews: Number(productData.reviews || 0),
       stock: Number(productData.stock || 0),
       createdAt: new Date(),
+      basePrice: Number(productData.basePrice || productData.price || 0),
     };
 
     const result = await req.dbclient
