@@ -101,6 +101,7 @@ app.use("/group-buy", require("./routes/groupBuy"));
 
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
+app.use("/bids", require("./routes/bids"));
 
 // Use server.listen instead of app.listen
 server.listen(port, () => {
