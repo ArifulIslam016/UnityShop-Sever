@@ -8,10 +8,11 @@ const DB_NAME = "UnityShopDB";
 const COLLECTION_NAME = "products";
 
 // Place a bid on a product
-router.patch("/bid/:id", async (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
-    const { newBid, bidderName, bidderEmail } = req.body;
+    console.log("Bid request for product ID:", id);
+    const { newBid, bidderName, bidderEmail,bidderImage } = req.body;
 
     const collection = req.dbclient.db(DB_NAME).collection(COLLECTION_NAME);
 
@@ -37,13 +38,17 @@ router.patch("/bid/:id", async (req, res) => {
     }
 
     // Update the product with new highest bid and bidder info
-    const result = await collection.updateOne(
-      { _id: new ObjectId(id) },
+    const result = await req.dbclient.db(DB_NAME).collection(COLLECTION_NAME).updateOne(
+      { _id: new ObjectId(id),$or: [
+          { currentHighestBId: { $lt: parseInt(newBid) } },
+          { currentHighestBId: { $exists: false } }
+        ] },
       {
         $set: {
           currentHighestBId: Number(newBid),
           highestBidderName: bidderName,
           highestBidderEmail: bidderEmail,
+          highestBidderImage: bidderImage,
           lastBidAt: new Date(),
         },
         //optinal history of bids
@@ -52,13 +57,14 @@ router.patch("/bid/:id", async (req, res) => {
             name: bidderName,
             email: bidderEmail,
             amount: Number(newBid),
+            bidderImage: bidderImage,
             time: new Date()
           }
         }
       }
     );
 
-    res.send({ message: "Bid placed successfully", result });
+    res.send(result);
   } catch (error) {
     console.error("Bidding error:", error);
     res.status(500).send({ error: "Failed to place bid" });
