@@ -1,4 +1,5 @@
 // src/sockets/productViewer.js
+
 module.exports = (io, socket) => {
   // Keep track of viewers per product in memory
   const viewers = {}; // { productId: Set of socketIds }

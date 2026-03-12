@@ -75,49 +75,12 @@ const authRoutes = require('./routes/auth');
 const ordersRoutes = require('./routes/orders');
 const promoRoutes = require('./routes/promo');
 
+// Root endpoint
 app.get('/', (req, res) => {
   res.send('Welcome to the UnityShop API!');
-// Import routes
-const aboutRoutes = require("./routes/about");
-const contactRoutes = require("./routes/contact");
-const homeRoutes = require("./routes/home");
-const usersRoutes = require("./routes/users");
-const productRoutes = require("./routes/product");
-const catRoutes = require("./routes/cart");
-const authRoutes = require("./routes/auth");
-const ordersRoutes = require("./routes/orders");
-const promoRoutes = require("./routes/promo");
-
-app.get("/", (req, res) => {
-  res.send("Welcome to the UnityShop API!");
 });
 
-app.use("/about", aboutRoutes);
-app.use("/contact", contactRoutes);
-app.use("/home", homeRoutes);
-app.use("/users", usersRoutes);
-app.use("/auth", authRoutes);
-app.use("/payment", require("./routes/payment"));
-app.use("/products", productRoutes);
-app.use("/product", productRoutes);
-app.use("/orders", ordersRoutes);
-app.use("/cart", catRoutes);
-app.use("/notifications", require("./routes/notifications"));
-app.use("/upload", require("./routes/upload"));
-app.use("/seller-requests", require("./routes/sellerRequests"));
-app.use("/group-buy", require("./routes/groupBuy"));
-
-
-
-app.use("/promo", promoRoutes);
-app.use("/reviews", require("./routes/reviews"));
-app.use("/bids", require("./routes/bids"));
-
-// Use server.listen instead of app.listen
-server.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
-
+// Route handlers
 app.use('/about', aboutRoutes);
 app.use('/contact', contactRoutes);
 app.use('/home', homeRoutes);
@@ -130,8 +93,11 @@ app.use('/orders', ordersRoutes);
 app.use('/cart', cartRoutes);
 app.use('/notifications', require('./routes/notifications'));
 app.use('/upload', require('./routes/upload'));
+app.use('/seller-requests', require('./routes/sellerRequests'));
+app.use('/group-buy', require('./routes/groupBuy'));
 app.use('/promo', promoRoutes);
 app.use('/reviews', require('./routes/reviews'));
+app.use('/bids', require('./routes/bids'));
 
 // Import Socket Handlers
 const productViewerSocket = require('./sockets/productViewer');
