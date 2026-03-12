@@ -1,13 +1,187 @@
-const express = require("express");
-const { ObjectId } = require("mongodb");
+const express = require('express');
+const { ObjectId } = require('mongodb');
 const router = express.Router();
 
-const DB_NAME = "UnityShopDB";
-const ORDERS_COLLECTION = "paidOrders";
-const PRODUCTS_COLLECTION = "products";
+const DB_NAME = 'UnityShopDB';
+const ORDERS_COLLECTION = 'paidOrders';
+const PRODUCTS_COLLECTION = 'products';
+const STATUS_STEPS = ['New', 'Processing', 'Shipped', 'Delivered'];
+
+// ROUTE 1: GET /orders/track/:id
+// Purpose: Fetch a single order by ID for the tracking view
+// Used by: User dashboard → My Orders → Track button
+router.get('/track/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid order ID' });
+    }
+
+    const order = await req.dbclient
+      .db(DB_NAME)
+      .collection(ORDERS_COLLECTION)
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // If old order has no statusHistory, build it on the fly
+    // so old orders don't break the tracking UI
+    if (!order.statusHistory || order.statusHistory.length === 0) {
+      order.statusHistory = [
+        {
+          status: order.status || 'New',
+          label: 'Order Confirmed',
+          updatedAt: order.createdAt || new Date(),
+        },
+      ];
+    }
+
+    // If no estimatedDeliveryDate, generate one on the fly
+    if (!order.estimatedDeliveryDate) {
+      const est = new Date(order.createdAt || new Date());
+      est.setDate(est.getDate() + 5);
+      order.estimatedDeliveryDate = est;
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error('Failed to fetch order for tracking:', error);
+    res.status(500).json({ error: 'Failed to fetch order' });
+  }
+});
+
+// ROUTE 2: PATCH /orders/track/:id/status
+// Purpose: Admin updates order status + pushes to history
+// Used by: Admin dashboard → Orders Management
+router.patch('/track/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, deliveryPartner } = req.body;
+
+    // Validate the status
+    if (!STATUS_STEPS.includes(status) && status !== 'Cancelled') {
+      return res.status(400).json({
+        error: `Invalid status. Allowed: ${[...STATUS_STEPS, 'Cancelled'].join(', ')}`,
+      });
+    }
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid order ID' });
+    }
+
+    const db = req.dbclient.db(DB_NAME);
+
+    // Fetch order first — needed for notifications
+    const order = await db
+      .collection(ORDERS_COLLECTION)
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Build history entry
+    const historyEntry = {
+      status,
+      label: getStatusLabel(status),
+      updatedAt: new Date(),
+    };
+
+    // Build update fields
+    const updateFields = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    if (deliveryPartner) {
+      updateFields.deliveryPartner = deliveryPartner;
+    }
+
+    const result = await db.collection(ORDERS_COLLECTION).updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: updateFields,
+        $push: { statusHistory: historyEntry },
+      },
+    );
+
+    // ── Notify buyer in real-time ─────────────────────────────
+    if (req.io && order.customerEmail) {
+      const buyerEmail = order.customerEmail;
+
+      const notification = {
+        email: buyerEmail,
+        type: 'order_status',
+        title: `Order ${getStatusLabel(status)}`,
+        message: `Your order for "${order.productName || 'your item'}" is now "${getStatusLabel(status)}".`,
+        meta: { orderId: id, status },
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection('notifications').insertOne(notification);
+      req.io.to(buyerEmail.toLowerCase()).emit('notification', notification);
+
+      // Dedicated tracking event — frontend stepper listens to this
+      req.io.to(buyerEmail.toLowerCase()).emit('orderTrackingUpdated', {
+        orderId: id,
+        status,
+        historyEntry,
+      });
+    }
+
+    // ── Notify seller on Delivered or Cancelled ───────────────
+    if (
+      req.io &&
+      order.sellerEmail &&
+      (status === 'Delivered' || status === 'Cancelled')
+    ) {
+      const sellerNotif = {
+        email: order.sellerEmail,
+        type: 'order_status',
+        title: `Order ${getStatusLabel(status)}`,
+        message: `Order for "${order.productName}" from ${order.customerName || order.customerEmail} is now "${getStatusLabel(status)}".`,
+        meta: { orderId: id, status },
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection('notifications').insertOne(sellerNotif);
+      req.io
+        .to(order.sellerEmail.toLowerCase())
+        .emit('notification', sellerNotif);
+    }
+
+    res.json({
+      message: 'Order status updated successfully',
+      status,
+      historyEntry,
+      result,
+    });
+  } catch (error) {
+    console.error('Failed to update tracking status:', error);
+    res.status(500).json({ error: 'Failed to update order status' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Helper: human-readable label for each status
+function getStatusLabel(status) {
+  const labels = {
+    New: 'Order Confirmed',
+    Processing: 'Being Packed',
+    Shipped: 'Shipped',
+    Delivered: 'Delivered',
+    Cancelled: 'Cancelled',
+  };
+  return labels[status] || status;
+}
 
 // Get orders - filter by sellerEmail or customerEmail
-router.get("/", async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { sellerEmail, customerEmail } = req.query;
     let query = {};
@@ -28,16 +202,16 @@ router.get("/", async (req, res) => {
 
     res.send(orders);
   } catch (error) {
-    res.status(500).send({ error: "Failed to fetch orders" });
+    res.status(500).send({ error: 'Failed to fetch orders' });
   }
 });
 
 // Get seller stats (product count, order count, revenue)
-router.get("/seller-stats", async (req, res) => {
+router.get('/seller-stats', async (req, res) => {
   try {
     const { sellerEmail } = req.query;
     if (!sellerEmail) {
-      return res.status(400).send({ error: "sellerEmail is required" });
+      return res.status(400).send({ error: 'sellerEmail is required' });
     }
 
     const db = req.dbclient.db(DB_NAME);
@@ -61,8 +235,8 @@ router.get("/seller-stats", async (req, res) => {
 
     // Count orders by status
     const statusCounts = {};
-    orders.forEach((order) => {
-      const status = order.status || "New";
+    orders.forEach(order => {
+      const status = order.status || 'New';
       statusCounts[status] = (statusCounts[status] || 0) + 1;
     });
 
@@ -75,14 +249,14 @@ router.get("/seller-stats", async (req, res) => {
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
 
-      const dayOrders = orders.filter((order) => {
+      const dayOrders = orders.filter(order => {
         const orderDate = new Date(order.createdAt);
         return orderDate >= date && orderDate < nextDate;
       });
 
       last7Days.push({
-        date: date.toISOString().split("T")[0],
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
+        date: date.toISOString().split('T')[0],
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
         orders: dayOrders.length,
         revenue: dayOrders.reduce(
           (sum, o) => sum + (Number(o.amountPaid) || 0),
@@ -99,17 +273,18 @@ router.get("/seller-stats", async (req, res) => {
       last7Days,
     });
   } catch (error) {
-    console.error("Failed to fetch seller stats:", error);
-    res.status(500).send({ error: "Failed to fetch seller stats" });
+    console.error('Failed to fetch seller stats:', error);
+    res.status(500).send({ error: 'Failed to fetch seller stats' });
   }
 });
 
+//
 // Get user stats (order count, total spent, pending count)
-router.get("/user-stats", async (req, res) => {
+router.get('/user-stats', async (req, res) => {
   try {
     const { customerEmail } = req.query;
     if (!customerEmail) {
-      return res.status(400).send({ error: "customerEmail is required" });
+      return res.status(400).send({ error: 'customerEmail is required' });
     }
 
     const db = req.dbclient.db(DB_NAME);
@@ -128,36 +303,36 @@ router.get("/user-stats", async (req, res) => {
 
     // Count by status
     const statusCounts = {};
-    orders.forEach((order) => {
-      const status = order.status || "New";
+    orders.forEach(order => {
+      const status = order.status || 'New';
       statusCounts[status] = (statusCounts[status] || 0) + 1;
     });
 
     const pendingCount =
-      (statusCounts["New"] || 0) +
-      (statusCounts["Processing"] || 0) +
-      (statusCounts["Shipped"] || 0);
+      (statusCounts['New'] || 0) +
+      (statusCounts['Processing'] || 0) +
+      (statusCounts['Shipped'] || 0);
 
     // Get wishlist count
-    const user = await db.collection("users").findOne({ email: customerEmail });
+    const user = await db.collection('users').findOne({ email: customerEmail });
     const wishlistCount = (user?.wishlist || []).length;
 
     res.send({
       totalOrders,
       totalSpent,
       pendingCount,
-      deliveredCount: statusCounts["Delivered"] || 0,
+      deliveredCount: statusCounts['Delivered'] || 0,
       wishlistCount,
       statusCounts,
     });
   } catch (error) {
-    console.error("Failed to fetch user stats:", error);
-    res.status(500).send({ error: "Failed to fetch user stats" });
+    console.error('Failed to fetch user stats:', error);
+    res.status(500).send({ error: 'Failed to fetch user stats' });
   }
 });
 
 // Get platform-wide stats for manager dashboard
-router.get("/platform-stats", async (req, res) => {
+router.get('/platform-stats', async (req, res) => {
   try {
     const db = req.dbclient.db(DB_NAME);
 
@@ -175,19 +350,19 @@ router.get("/platform-stats", async (req, res) => {
       0,
     );
     const statusCounts = {};
-    orders.forEach((order) => {
-      const status = order.status || "New";
+    orders.forEach(order => {
+      const status = order.status || 'New';
       statusCounts[status] = (statusCounts[status] || 0) + 1;
     });
 
     // Get total users, sellers, pending seller requests
-    const usersCollection = db.collection("users");
+    const usersCollection = db.collection('users');
     const totalUsers = await usersCollection.countDocuments();
     const totalSellers = await usersCollection.countDocuments({
-      role: "seller",
+      role: 'seller',
     });
     const pendingSellerRequests = await usersCollection.countDocuments({
-      sellerRequest: "pending",
+      sellerRequest: 'pending',
     });
 
     // Get total products
@@ -198,7 +373,7 @@ router.get("/platform-stats", async (req, res) => {
     // Today's stats
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayOrders = orders.filter((o) => new Date(o.createdAt) >= today);
+    const todayOrders = orders.filter(o => new Date(o.createdAt) >= today);
     const todaySales = todayOrders.reduce(
       (sum, o) => sum + (Number(o.amountPaid) || Number(o.amountpaid) || 0),
       0,
@@ -219,14 +394,14 @@ router.get("/platform-stats", async (req, res) => {
       const nextDate = new Date(date);
       nextDate.setDate(nextDate.getDate() + 1);
 
-      const dayOrders = orders.filter((order) => {
+      const dayOrders = orders.filter(order => {
         const orderDate = new Date(order.createdAt);
         return orderDate >= date && orderDate < nextDate;
       });
 
       last7Days.push({
-        date: date.toISOString().split("T")[0],
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
+        date: date.toISOString().split('T')[0],
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
         orders: dayOrders.length,
         revenue: dayOrders.reduce(
           (sum, o) => sum + (Number(o.amountPaid) || Number(o.amountpaid) || 0),
@@ -253,13 +428,13 @@ router.get("/platform-stats", async (req, res) => {
       recentOrders,
     });
   } catch (error) {
-    console.error("Failed to fetch platform stats:", error);
-    res.status(500).send({ error: "Failed to fetch platform stats" });
+    console.error('Failed to fetch platform stats:', error);
+    res.status(500).send({ error: 'Failed to fetch platform stats' });
   }
 });
 
 // Get admin monthly stats (last 12 months of orders + user registrations)
-router.get("/admin-monthly-stats", async (req, res) => {
+router.get('/admin-monthly-stats', async (req, res) => {
   try {
     const db = req.dbclient.db(DB_NAME);
 
@@ -271,7 +446,7 @@ router.get("/admin-monthly-stats", async (req, res) => {
       months.push({
         year: d.getFullYear(),
         month: d.getMonth(), // 0-indexed
-        label: d.toLocaleDateString("en-US", { month: "short" }),
+        label: d.toLocaleDateString('en-US', { month: 'short' }),
         start: new Date(d.getFullYear(), d.getMonth(), 1),
         end: new Date(d.getFullYear(), d.getMonth() + 1, 1),
       });
@@ -282,22 +457,22 @@ router.get("/admin-monthly-stats", async (req, res) => {
 
     // Get all users
     const users = await db
-      .collection("users")
+      .collection('users')
       .find({}, { projection: { createdAt: 1, role: 1 } })
       .toArray();
 
-    const monthlyData = months.map((m) => {
-      const monthOrders = orders.filter((o) => {
+    const monthlyData = months.map(m => {
+      const monthOrders = orders.filter(o => {
         const d = new Date(o.createdAt);
         return d >= m.start && d < m.end;
       });
-      const monthUsers = users.filter((u) => {
+      const monthUsers = users.filter(u => {
         const d = new Date(u.createdAt);
         return d >= m.start && d < m.end;
       });
-      const monthSellers = users.filter((u) => {
+      const monthSellers = users.filter(u => {
         const d = new Date(u.createdAt);
-        return d >= m.start && d < m.end && u.role === "seller";
+        return d >= m.start && d < m.end && u.role === 'seller';
       });
 
       return {
@@ -314,13 +489,13 @@ router.get("/admin-monthly-stats", async (req, res) => {
 
     res.send(monthlyData);
   } catch (error) {
-    console.error("Failed to fetch admin monthly stats:", error);
-    res.status(500).send({ error: "Failed to fetch admin monthly stats" });
+    console.error('Failed to fetch admin monthly stats:', error);
+    res.status(500).send({ error: 'Failed to fetch admin monthly stats' });
   }
 });
 
 // Update order status
-router.patch("/:id", async (req, res) => {
+router.patch('/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const { status } = req.body;
@@ -342,39 +517,39 @@ router.patch("/:id", async (req, res) => {
       if (buyerEmail) {
         const notification = {
           email: buyerEmail,
-          type: "order_status",
+          type: 'order_status',
           title: `Order ${status}`,
-          message: `Your order for ${order.productName || "your item"} has been updated to "${status}".`,
+          message: `Your order for ${order.productName || 'your item'} has been updated to "${status}".`,
           meta: { orderId: id, status },
           read: false,
           createdAt: new Date(),
         };
 
-        await db.collection("notifications").insertOne(notification);
-        req.io.to(buyerEmail.toLowerCase()).emit("notification", notification);
+        await db.collection('notifications').insertOne(notification);
+        req.io.to(buyerEmail.toLowerCase()).emit('notification', notification);
       }
 
       // Also notify seller if status is relevant (e.g., Delivered)
       const sellerEmail = order.sellerEmail;
-      if (sellerEmail && (status === "Delivered" || status === "Cancelled")) {
+      if (sellerEmail && (status === 'Delivered' || status === 'Cancelled')) {
         const sellerNotif = {
           email: sellerEmail,
-          type: "order_status",
+          type: 'order_status',
           title: `Order ${status}`,
-          message: `Order for ${order.productName || "an item"} from ${order.customerName || order.customerEmail} is now "${status}".`,
+          message: `Order for ${order.productName || 'an item'} from ${order.customerName || order.customerEmail} is now "${status}".`,
           meta: { orderId: id, status },
           read: false,
           createdAt: new Date(),
         };
 
-        await db.collection("notifications").insertOne(sellerNotif);
-        req.io.to(sellerEmail.toLowerCase()).emit("notification", sellerNotif);
+        await db.collection('notifications').insertOne(sellerNotif);
+        req.io.to(sellerEmail.toLowerCase()).emit('notification', sellerNotif);
       }
     }
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: "Failed to update order" });
+    res.status(500).send({ error: 'Failed to update order' });
   }
 });
 
