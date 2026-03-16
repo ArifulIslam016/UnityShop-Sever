@@ -28,6 +28,10 @@ router.patch("/:id", async (req, res) => {
     if (product.endAt && now > new Date(product.endAt)) {
       return res.status(400).send({ error: "Auction has already ended!" });
     }
+//  owner can't bid on their own product
+    if (product.sellerEmail === bidderEmail) {
+      return res.status(400).send({ error: "Owner can't bid on their own product!" });
+    } 
 
     // Cheeck the bid is higher than current highest bid
     const currentMax = Number(product.currentHighestBId || 0);
@@ -74,7 +78,12 @@ router.patch("/:id", async (req, res) => {
           },
         },
       );
-
+// cheeck another user has already placed a higher bid
+    if (result.matchedCount === 0) {
+      return res.status(400).send({
+        error: "Bid was not placed. Another user may have already placed a higher bid.",
+      });
+    }
     res.send(result);
   } catch (error) {
     console.error("Bidding error:", error);

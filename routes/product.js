@@ -333,6 +333,7 @@ router.post('/', async (req, res) => {
       stock: Number(productData.stock || 0),
       views: 0, // ← initialize view count to 0 on creation
       createdAt: new Date(),
+      endAt:productData.endAt,
       basePrice: Number(productData.basePrice || productData.price || 0),
       currentHighestBId: Number(
         productData.basePrice || productData.price || 0,
