@@ -1,9 +1,9 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+require("dotenv").config();
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const cors = require("cors");
+const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -14,8 +14,8 @@ const server = http.createServer(app);
 // Initialize Socket.io
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+    origin: "*",
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
   },
 });
 
@@ -45,7 +45,8 @@ let connectionPromise = null;
 async function connectToDatabase() {
   if (!connectionPromise) {
     connectionPromise = client.connect().then(() => {
-      console.log('Successfully connected to MongoDB!');
+      console.log("Successfully connected to MongoDB!");
+      runAuctionCheck(client); // Start the scheduled task for auction checks
       return client;
     });
   }
@@ -59,55 +60,56 @@ app.use(async (req, res, next) => {
     req.dbclient = client;
     next();
   } catch (error) {
-    console.error('MongoDB connection error:', error);
-    res.status(500).json({ error: 'Database connection failed' });
+    console.error("MongoDB connection error:", error);
+    res.status(500).json({ error: "Database connection failed" });
   }
 });
 
 // Routes
-const aboutRoutes = require('./routes/about');
-const contactRoutes = require('./routes/contact');
-const homeRoutes = require('./routes/home');
-const usersRoutes = require('./routes/users');
-const productRoutes = require('./routes/product');
-const cartRoutes = require('./routes/cart');
-const authRoutes = require('./routes/auth');
-const ordersRoutes = require('./routes/orders');
-const promoRoutes = require('./routes/promo');
-
+const aboutRoutes = require("./routes/about");
+const contactRoutes = require("./routes/contact");
+const homeRoutes = require("./routes/home");
+const usersRoutes = require("./routes/users");
+const productRoutes = require("./routes/product");
+const cartRoutes = require("./routes/cart");
+const authRoutes = require("./routes/auth");
+const ordersRoutes = require("./routes/orders");
+const promoRoutes = require("./routes/promo");
+const runAuctionCheck = require("./routes/scheduledTask");
 // Root endpoint
-app.get('/', (req, res) => {
-  res.send('Welcome to the UnityShop API!');
+app.get("/", (req, res) => {
+  res.send("Welcome to the UnityShop API!");
 });
 
 // Route handlers
-app.use('/about', aboutRoutes);
-app.use('/contact', contactRoutes);
-app.use('/home', homeRoutes);
-app.use('/users', usersRoutes);
-app.use('/auth', authRoutes);
-app.use('/payment', require('./routes/payment'));
-app.use('/products', productRoutes);
-app.use('/product', productRoutes);
-app.use('/orders', ordersRoutes);
-app.use('/cart', cartRoutes);
-app.use('/notifications', require('./routes/notifications'));
-app.use('/upload', require('./routes/upload'));
-app.use('/seller-requests', require('./routes/sellerRequests'));
-app.use('/group-buy', require('./routes/groupBuy'));
-app.use('/promo', promoRoutes);
-app.use('/reviews', require('./routes/reviews'));
-app.use('/bids', require('./routes/bids'));
+app.use("/about", aboutRoutes);
+app.use("/contact", contactRoutes);
+app.use("/home", homeRoutes);
+app.use("/users", usersRoutes);
+app.use("/auth", authRoutes);
+app.use("/payment", require("./routes/payment"));
+app.use("/products", productRoutes);
+app.use("/product", productRoutes);
+app.use("/orders", ordersRoutes);
+app.use("/cart", cartRoutes);
+app.use("/notifications", require("./routes/notifications"));
+app.use("/upload", require("./routes/upload"));
+app.use("/seller-requests", require("./routes/sellerRequests"));
+app.use("/group-buy", require("./routes/groupBuy"));
+app.use("/promo", promoRoutes);
+app.use("/reviews", require("./routes/reviews"));
+app.use("/bids", require("./routes/bids"));
+// app.use('/scheduled-tasks', require('./routes/scheduledTask'));
 
 // Import Socket Handlers
-const productViewerSocket = require('./sockets/productViewer');
+const productViewerSocket = require("./sockets/productViewer");
 
 // Socket Connection
-io.on('connection', socket => {
-  console.log('Client connected:', socket.id);
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id);
 
   // General room join system
-  socket.on('join', room => {
+  socket.on("join", (room) => {
     if (room) {
       socket.join(room);
       console.log(`Socket ${socket.id} joined room: ${room}`);
@@ -117,14 +119,21 @@ io.on('connection', socket => {
   // Product live viewer tracking
   productViewerSocket(io, socket);
 
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
   });
 });
 
 // Start Server
-server.listen(port, () => {
+// Start Server and Database Connection immediately
+server.listen(port, async () => {
   console.log(`Server running on port ${port}`);
+  try {
+    // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
+    await connectToDatabase();
+    console.log("Background tasks (Auction Check) initialized.");
+  } catch (err) {
+    console.error("Initial DB connection failed:", err);
+  }
 });
-
 module.exports = app;
