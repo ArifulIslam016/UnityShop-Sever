@@ -133,6 +133,7 @@ io.on("connection", (socket) => {
 server.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   try {
+    // Ensure DB connection is established at startup
     // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
     await connectToDatabase();
   } catch (err) {
