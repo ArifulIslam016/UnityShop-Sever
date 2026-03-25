@@ -101,6 +101,10 @@ app.use("/reviews", require("./routes/reviews"));
 app.use("/bids", require("./routes/bids"));
 // app.use('/scheduled-tasks', require('./routes/scheduledTask'));
 
+// 🚀 AI Routes
+const aiRoutes = require("./routes/ai");
+app.use("/api/ai", aiRoutes);
+
 // Import Socket Handlers
 const productViewerSocket = require("./sockets/productViewer");
 
@@ -130,6 +134,7 @@ server.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   try {
     // Ensure DB connection is established at startup
+    // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
     await connectToDatabase();
   } catch (err) {
     console.error("Initial DB connection failed:", err);
