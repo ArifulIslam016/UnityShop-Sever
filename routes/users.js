@@ -14,6 +14,21 @@ router.get("/", async (req, res) => {
     res.status(500).send(error);
   }
 });
+
+// Get Delivery Users
+router.get("/role/delivery", async (req, res) => {
+  try {
+    const users = await req.dbclient
+      .db("UnityShopDB")
+      .collection("users")
+      .find({ role: "delivery" })
+      .toArray();
+    res.send(users);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
 // User create api
 router.post("/", async (req, res) => {
   try {
@@ -272,7 +287,104 @@ router.patch("/reject-seller/:email", async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
+// ===== Request Delivery Man — Submit a delivery role request (User) =====
+router.patch("/request-delivery/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const { nid, vehicleType, preferredArea, licenseNumber, experience } =
+      req.body;
 
+    const db = req.dbclient.db("UnityShopDB");
+    const user = await db.collection("users").findOne({ email });
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.role === "delivery")
+      return res.status(400).json({ message: "Already a delivery partner" });
+
+    // Update user doc with deliveryRequest object
+    const result = await db.collection("users").updateOne(
+      { email },
+      {
+        $set: {
+          deliveryRequest: {
+            status: "pending",
+            nid,
+            vehicleType,
+            preferredArea,
+            licenseNumber,
+            experience,
+            requestedAt: new Date(),
+          },
+        },
+      },
+    );
+
+    res.json({ message: "Delivery request submitted successfully", result });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ===== Get Delivery Requests (Admin) =====
+router.get("/delivery-requests", async (req, res) => {
+  try {
+    const db = req.dbclient.db("UnityShopDB");
+    const requests = await db
+      .collection("users")
+      .find({ "deliveryRequest.status": "pending" })
+      .toArray();
+    res.json(requests);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ===== Approve Delivery Request (Admin) =====
+router.patch("/approve-delivery/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const db = req.dbclient.db("UnityShopDB");
+
+    const result = await db.collection("users").updateOne(
+      { email },
+      {
+        $set: {
+          role: "delivery", // Promote to delivery role
+          "deliveryRequest.status": "approved",
+          "deliveryRequest.approvedAt": new Date(),
+        },
+      },
+    );
+
+    res.json({ message: "Delivery request approved", result });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ===== Reject Delivery Request (Admin) =====
+router.patch("/reject-delivery/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const db = req.dbclient.db("UnityShopDB");
+
+    const result = await db.collection("users").updateOne(
+      { email },
+      {
+        $set: {
+          "deliveryRequest.status": "rejected",
+          "deliveryRequest.rejectedAt": new Date(),
+        },
+      },
+    );
+
+    res.json({ message: "Delivery request rejected", result });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+module.exports = router;
 // ===== Change User Role — Admin can change any user's role =====
 router.patch("/change-role/:email", async (req, res) => {
   try {
