@@ -76,4 +76,89 @@ router.post("/enhance-product-image", verifyToken, async (req, res) => {
   }
 });
 
+router.get("/test", (req, res) => {
+  res.json({ message: "AI route is working!" });
+});
+
+// Support endpoint
+router.post("/support", auth, async (req, res) => {
+  try {
+    const { message, orderId, productId, userId } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+
+    // Build context from order or product (if provided)
+    let context = "";
+    if (orderId) {
+      // Fetch order details from database (optional)
+      const order = await getOrderById(orderId); // you'll need to implement this
+      if (order) {
+        context = `
+Order ID: ${order._id}
+Status: ${order.status}
+Total: $${order.total}
+Items: ${order.items.map((i) => i.productName).join(", ")}
+Date: ${order.createdAt.toDateString()}
+        `;
+      }
+    }
+    if (productId && !orderId) {
+      // Fetch product details
+      const product = await getProductById(productId);
+      if (product) {
+        context = `
+Product: ${product.name}
+Category: ${product.category || "Not specified"}
+Price: $${product.price}
+        `;
+      }
+    }
+
+    const prompt = `
+You are a customer support assistant for an e-commerce store called UnityShop. Your job is to help customers with after-sales issues: order tracking, returns, refunds, delivery problems, product defects, etc. Be friendly, helpful, and concise.
+
+Customer message: "${message}"
+
+${context ? `Relevant context:\n${context}` : ""}
+
+Provide a helpful response. If the customer asks about a refund or return, ask for order details and explain the process. If the issue is about delivery, suggest checking tracking and contacting the carrier. For complex issues, advise them to contact customer service directly.
+    `;
+
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "system",
+            content: "You are a helpful customer support assistant.",
+          },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 300,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || "Groq API error");
+    }
+
+    const data = await response.json();
+    const reply = data.choices[0].message.content.trim();
+
+    res.json({ success: true, message: reply });
+  } catch (error) {
+    console.error("Support API error:", error);
+    res.status(500).json({ error: "Failed to process support request" });
+  }
+});
+
 module.exports = router;
