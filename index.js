@@ -76,7 +76,6 @@ const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 const promoRoutes = require("./routes/promo");
 const runAuctionCheck = require("./routes/scheduledTask");
-
 // Root endpoint
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
@@ -136,10 +135,8 @@ server.listen(port, async () => {
   try {
     // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
     await connectToDatabase();
-    console.log("Background tasks (Auction Check) initialized.");
   } catch (err) {
     console.error("Initial DB connection failed:", err);
   }
 });
-
 module.exports = app;
