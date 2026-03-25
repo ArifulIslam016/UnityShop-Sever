@@ -101,10 +101,6 @@ app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
 app.use("/bids", require("./routes/bids"));
 
-// 🚀 AI Routes
-const aiRoutes = require("./routes/ai");
-app.use("/api/ai", aiRoutes);
-
 // Import Socket Handlers
 const productViewerSocket = require("./sockets/productViewer");
 

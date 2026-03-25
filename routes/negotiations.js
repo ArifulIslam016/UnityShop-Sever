@@ -1,104 +1,170 @@
-// routes/negotiations.js
 const express = require("express");
+const { ObjectId } = require("mongodb");
 const router = express.Router();
-const auth = require("../middleware/auth"); // we'll create this next
-const Negotiation = require("../models/Negotiation");
-const { generateAIMessage } = require("../utils/aiHelper"); // we'll create this
+const jwt = require("jsonwebtoken");
 
-// POST /api/negotiations - create a new negotiation
-router.post("/", auth, async (req, res) => {
+const DB_NAME = "UnityShopDB";
+const COLLECTION_NAME = "negotiations";
+const JWT_SECRET = process.env.JWT_SECRET || "unityshop_secret_key_2026";
+
+// Auth middleware helper
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
   try {
-    const { productId, productPrice, userMessage, sellerId } = req.body;
-    if (!productId || !productPrice || !sellerId) {
-      return res.status(400).json({ error: "Missing required fields" });
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
+
+// Create a new negotiation
+router.post("/", verifyToken, async (req, res) => {
+  try {
+    const { productId, productPrice, productName, userMessage, sellerId, offerPrice, aiResponse, suggestion } = req.body;
+    
+    let finalSellerId = null;
+
+    // Check if sellerId passed from frontend is actually an email string
+    if (typeof sellerId === 'string' && sellerId.includes('@')) {
+         const sellerDoc = await req.dbclient.db(DB_NAME).collection("users").findOne({ email: sellerId });
+         if (sellerDoc) {
+             finalSellerId = sellerDoc._id; // Store exactly the seller's id
+         } else {
+             return res.status(400).json({ error: "Seller out of bounds" });
+         }
+    } else {
+         finalSellerId = new ObjectId(sellerId);
     }
 
-    // Extract offer amount from message (simple regex)
-    const offerMatch = userMessage.match(/\$?(\d+(?:\.\d{2})?)/);
-    const offerPrice = offerMatch ? parseFloat(offerMatch[1]) : null;
+    const newNegotiation = {
+      product: new ObjectId(productId),
+      buyer: new ObjectId(req.user.userId),
+      seller: finalSellerId,
+      offerPrice: parseFloat(offerPrice),
+      originalPrice: parseFloat(productPrice),
+      status: "pending",
+      messages: [
+        {
+          sender: new ObjectId(req.user.userId),
+          message: userMessage,
+          timestamp: new Date()
+        }
+      ],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    };
 
-    if (!offerPrice) {
-      return res.status(400).json({ error: "No price detected in message" });
+    const result = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .insertOne(newNegotiation);
+
+    if (req.io) {
+      req.io.to(typeof sellerId === 'string' && sellerId.includes('@') ? sellerId.toLowerCase() : finalSellerId.toString()).emit('new_negotiation', {
+        message: `New negotiation offer for ${productName} from a buyer.`,
+        negotiationId: result.insertedId
+      });
     }
 
-    const negotiation = new Negotiation({
-      product: productId,
-      buyer: req.user._id,
-      seller: sellerId,
-      offerPrice,
-      originalPrice: productPrice,
-      messages: [{ sender: req.user._id, message: userMessage }],
+    res.status(201).json({ success: true, negotiationId: result.insertedId, aiResponse, suggestion });
+  } catch (error) {
+    console.error("Negotiation creation error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Get seller's negotiations
+router.get("/seller", verifyToken, async (req, res) => {
+  try {
+    // req.user.userId holds the _id of the current logged-in seller based on the JWT
+    const sellerId = req.user.userId; 
+
+    const negotiations = await req.dbclient
+      .db(DB_NAME)
+      .collection(COLLECTION_NAME)
+      .aggregate([
+        { $match: { seller: new ObjectId(sellerId) } },
+        {
+          $lookup: {
+            from: "products",
+            localField: "product",
+            foreignField: "_id",
+            as: "productDetails"
+          }
+        },
+        {
+          $lookup: {
+            from: "users",
+            localField: "buyer",
+            foreignField: "_id",
+            as: "buyerDetails"
+          }
+        },
+        { $unwind: "$productDetails" },
+        { $unwind: "$buyerDetails" },
+        { $sort: { createdAt: -1 } }
+      ]).toArray();
+
+    // Clean up sensitive fields
+    negotiations.forEach(n => {
+      delete n.buyerDetails.password;
     });
-    await negotiation.save();
 
-    // Generate AI response (use your existing mock logic or real AI)
-    const { aiResponse, suggestion } = generateAIMessage(
-      productPrice,
-      offerPrice,
-      userMessage,
+    res.json({ success: true, negotiations });
+  } catch (error) {
+    console.error("Fetch seller negotiations error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Update negotiation status
+router.patch("/:id", verifyToken, async (req, res) => {
+  try {
+    const { status, message } = req.body;
+    const negotiationId = req.params.id;
+
+    const updateDoc = {
+      $set: { status, updatedAt: new Date() }
+    };
+
+    if (message) {
+      updateDoc.$push = {
+        messages: {
+           sender: new ObjectId(req.user.userId),
+           message: message,
+           timestamp: new Date()
+        }
+      };
+    }
+
+    const db = req.dbclient.db(DB_NAME);
+    const result = await db.collection(COLLECTION_NAME).findOneAndUpdate(
+        { _id: new ObjectId(negotiationId), seller: new ObjectId(req.user.userId) },
+        updateDoc,
+        { returnDocument: 'after' }
     );
 
-    res.status(201).json({
-      success: true,
-      message: aiResponse,
-      suggestion,
-      offerPrice,
-      offerSent: true,
-      negotiationId: negotiation._id,
-    });
-  } catch (error) {
-    console.error("POST /negotiations error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+    if (!result) return res.status(404).json({ error: "Negotiation not found" });
 
-// GET /api/negotiations?status=pending&sellerId=xxx
-router.get("/", auth, async (req, res) => {
-  try {
-    const { status, sellerId } = req.query;
-    if (!sellerId) {
-      return res
-        .status(400)
-        .json({ error: "sellerId query parameter required" });
+    // Ensure we trigger notification to the buyer if the io socket exists
+    if (req.io) {
+      req.io.to(result.buyer.toString()).emit('negotiation_update', {
+        message: `Your offer status was updated to ${status}.`,
+        negotiationId,
+        status
+      });
     }
-    if (req.user._id !== sellerId && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    const filter = { seller: sellerId };
-    if (status) filter.status = status;
-    const negotiations = await Negotiation.find(filter)
-      .populate("product", "name price images")
-      .populate("buyer", "name email")
-      .sort({ createdAt: -1 });
-    res.json(negotiations);
-  } catch (error) {
-    console.error("GET /negotiations error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
 
-// PATCH /api/negotiations/:id - update status
-router.patch("/:id", auth, async (req, res) => {
-  try {
-    const { status } = req.body;
-    const { id } = req.params;
-    if (!["accepted", "rejected", "countered"].includes(status)) {
-      return res.status(400).json({ error: "Invalid status" });
-    }
-    const negotiation = await Negotiation.findById(id);
-    if (!negotiation) return res.status(404).json({ error: "Not found" });
-    if (
-      req.user._id !== negotiation.seller.toString() &&
-      req.user.role !== "admin"
-    ) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    negotiation.status = status;
-    await negotiation.save();
-    res.json({ success: true, negotiation });
+    res.json({ success: true, negotiation: result });
   } catch (error) {
-    console.error("PATCH /negotiations/:id error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
