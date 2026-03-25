@@ -24,6 +24,9 @@ router.post('/create-checkout-session', async (req, res) => {
     userEmail,
     sellerName,
     sellerEmail,
+    shippingAddress, // New
+    phoneNumber,     // New
+    breakdown,       // New: { shipping, customs, platform, subtotal }
   } = req.body;
 
   const metadataObject = {
@@ -33,10 +36,50 @@ router.post('/create-checkout-session', async (req, res) => {
     sellerEmail: sellerEmail,
     paidAmount: parseInt(price * quantity),
     paidAt: new Date().toISOString(),
+    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
+    phoneNumber: phoneNumber || "",
+    breakdown: breakdown ? JSON.stringify(breakdown) : "{}",
   };
 
-  const session = await stripe.checkout.sessions.create({
-    line_items: [
+  // Construct line items based on breakdown if available
+  let line_items = [];
+  if (breakdown) {
+     // Product Price
+     line_items.push({
+        price_data: {
+          currency: 'USD',
+          unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
+          product_data: {
+            name: productName,
+            description: `Sold by: ${sellerName}`,
+          },
+        },
+        quantity: 1,
+     });
+     // Shipping
+      if (breakdown.shipping > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'International Shipping' }, unit_amount: parseInt(breakdown.shipping * 100) },
+            quantity: 1,
+        });
+      }
+      // Customs
+      if (breakdown.customs > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'Est. Customs & Duty' }, unit_amount: parseInt(breakdown.customs * 100) },
+            quantity: 1,
+        });
+      }
+       // Platform Fee
+      if (breakdown.platform > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'Platform Fee' }, unit_amount: parseInt(breakdown.platform * 100) },
+            quantity: 1,
+        });
+      }
+  } else {
+    // Fallback
+    line_items = [
       {
         price_data: {
           currency: 'USD',
@@ -48,7 +91,11 @@ router.post('/create-checkout-session', async (req, res) => {
         },
         quantity: parseInt(quantity),
       },
-    ],
+    ];
+  }
+
+  const session = await stripe.checkout.sessions.create({
+    line_items: line_items,
     customer_email: userEmail,
     metadata: metadataObject,
     mode: 'payment',

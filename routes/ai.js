@@ -1,99 +1,79 @@
-// routes/ai.js
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth");
+const jwt = require("jsonwebtoken");
+const Replicate = require("replicate");
+const cloudinary = require("../utils/cloudinary");
 
-// In-memory cache
-const cache = new Map();
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
-
-// Groq API endpoint
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-
-router.post("/generate-description", auth, async (req, res) => {
-  try {
-    const { name, category, brand, price, imageUrl } = req.body;
-    if (!name)
-      return res.status(400).json({ error: "Product name is required" });
-
-    const cacheKey = `${name}_${category || ""}_${brand || ""}`;
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json({ success: true, description: cached.description });
-    }
-
-    const prompt = `
-You are an expert e-commerce copywriter. Generate a compelling, SEO-friendly product description as clean HTML code only. Do not include any markdown, code fences, or surrounding text.
-
-Product Name: ${name}
-Category: ${category || "Not specified"}
-Brand: ${brand || "Not specified"}
-
-Requirements:
-- Total length: 100-150 words.
-- Use a friendly, persuasive tone. Avoid generic phrases. Highlight what makes this product special.
-- Do NOT mention price or image.
-- Format the description using only HTML tags: <p> for paragraphs, <strong> for section titles (e.g., "Key Features", "Benefits", "Why Choose This Product"), <ul> and <li> for bullet points. Use <br> sparingly for line breaks.
-- Include relevant keywords naturally (product name, category, brand) for SEO.
-
-Example output structure:
-<strong>Key Features</strong>
-<ul>
-<li>Feature one</li>
-<li>Feature two</li>
-<li>Feature three</li>
-</ul>
-<strong>Benefits</strong>
-<p>Benefit description...</p>
-<strong>Why Choose This Product</strong>
-<p>Unique selling point...</p>
-<p>Closing persuasive paragraph.</p>
-
-Now generate only the HTML code (no other text).
-`;
-
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile", // free, fast, high quality
-        messages: [
-          { role: "system", content: "You are a helpful assistant." },
-          { role: "user", content: prompt },
-        ],
-        max_tokens: 500,
-        temperature: 0.7,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error("Groq API error:", errorData);
-      throw new Error(errorData.error?.message || "Groq API error");
-    }
-
-    const data = await response.json();
-    const description = data.choices[0].message.content.trim();
-
-    cache.set(cacheKey, { description, timestamp: Date.now() });
-    res.json({ success: true, description });
-  } catch (error) {
-    console.error("Description generation error:", error);
-    let errorMessage = "Failed to generate description";
-    if (error.message.includes("rate limit")) {
-      errorMessage = "AI service is busy (rate limit). Please try again later.";
-    } else {
-      errorMessage = error.message;
-    }
-    res.status(500).json({ error: errorMessage });
-  }
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_TOKEN,
 });
 
-router.get("/test", (req, res) => {
-  res.json({ message: "AI route is working!" });
+const JWT_SECRET = process.env.JWT_SECRET || "unityshop_secret_key_2026";
+
+// Auth middleware
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+};
+
+// Route for Image Enhancement using Replicate (BRIA Background Removal or similar)
+router.post("/enhance-product-image", verifyToken, async (req, res) => {
+  try {
+    const { image, style } = req.body;
+    if (!image) return res.status(400).json({ error: "Image is required" });
+
+    // Assuming the image is a base64 string, you might need to upload it to Cloudinary first
+    // to get a URL that Replicate can process, or if the API supports base64 directly, use that
+
+    const uploadResponse = await cloudinary.uploader.upload(image, {
+      folder: "unityshop/temp",
+    });
+    
+    // Choose model based on style
+    let promptText = "professional product photography, well-lit, clean background";
+    if (style === "luxury") promptText = "luxury product photography, dramatic lighting, premium feel";
+    else if (style === "minimal") promptText = "minimalist product photography, solid white background";
+
+    // Call Replicate API (example using a general image-to-image or background removal model)
+    // Here we're using a hypothetical or common model for image enhancement/background removal
+    // You should substitute with a specific Replicate model like 'salesforce/blip' or 'arielreplicate/rembg'
+    
+    // Using an example model for background removal and enhancement (adjust to real one)
+    const output = await replicate.run(
+      "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
+      {
+        input: {
+          image: uploadResponse.secure_url,
+        }
+      }
+    );
+
+    // output is typically an array with the URL or a single URL stream, depending on the model
+    // Assuming output is the enhanced image URL:
+    
+    const enhancedUrl = Array.isArray(output) ? output[0] : output;
+
+    // Optional: upload the enhanced URL back to Cloudinary for permanent storage
+    const finalUpload = await cloudinary.uploader.upload(enhancedUrl, {
+      folder: "unityshop/products",
+      public_id: `enhanced_${Date.now()}`
+    });
+
+    res.json({ success: true, enhancedImage: finalUpload.secure_url });
+  } catch (error) {
+    console.error("AI enhancement error:", error);
+    res.status(500).json({ error: "Failed to enhance image" });
+  }
 });
 
 module.exports = router;
