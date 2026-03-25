@@ -76,6 +76,7 @@ const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 const promoRoutes = require("./routes/promo");
 const runAuctionCheck = require("./routes/scheduledTask");
+
 // Root endpoint
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
@@ -99,7 +100,10 @@ app.use("/group-buy", require("./routes/groupBuy"));
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
 app.use("/bids", require("./routes/bids"));
-// app.use('/scheduled-tasks', require('./routes/scheduledTask'));
+
+// 🚀 AI Routes
+const aiRoutes = require("./routes/ai");
+app.use("/api/ai", aiRoutes);
 
 // Import Socket Handlers
 const productViewerSocket = require("./sockets/productViewer");
@@ -124,16 +128,15 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start Server
 // Start Server and Database Connection immediately
 server.listen(port, async () => {
   console.log(`Server running on port ${port}`);
   try {
-    // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
     await connectToDatabase();
     console.log("Background tasks (Auction Check) initialized.");
   } catch (err) {
     console.error("Initial DB connection failed:", err);
   }
 });
+
 module.exports = app;
