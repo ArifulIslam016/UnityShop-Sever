@@ -46,6 +46,7 @@ async function connectToDatabase() {
   if (!connectionPromise) {
     connectionPromise = client.connect().then(() => {
       console.log("Successfully connected to MongoDB!");
+      runAuctionCheck(client); // Start the scheduled task for auction checks
       return client;
     });
   }
@@ -74,6 +75,7 @@ const cartRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 const promoRoutes = require("./routes/promo");
+const runAuctionCheck = require("./routes/scheduledTask");
 
 // Root endpoint
 app.get("/", (req, res) => {
@@ -122,9 +124,15 @@ io.on("connection", (socket) => {
   });
 });
 
-// Start Server
-server.listen(port, () => {
+// Start Server and Database Connection immediately
+server.listen(port, async () => {
   console.log(`Server running on port ${port}`);
+  try {
+    await connectToDatabase();
+    console.log("Background tasks (Auction Check) initialized.");
+  } catch (err) {
+    console.error("Initial DB connection failed:", err);
+  }
 });
 
 module.exports = app;
