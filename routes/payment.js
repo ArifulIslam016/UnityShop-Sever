@@ -3,6 +3,7 @@ const router = express.Router();
 require('dotenv').config();
 const crypto = require('crypto');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { ObjectId } = require('mongodb');
 
 function generateTracingId() {
   return crypto.randomBytes(16).toString('hex');
@@ -22,11 +23,12 @@ router.post('/create-checkout-session', async (req, res) => {
     quantity,
     productName,
     userEmail,
+    userId,
     sellerName,
     sellerEmail,
-    shippingAddress, // New
-    phoneNumber,     // New
-    breakdown,       // New: { shipping, customs, platform, subtotal }
+    shippingAddress,
+    phoneNumber,
+    breakdown,
   } = req.body;
 
   const metadataObject = {
@@ -34,49 +36,62 @@ router.post('/create-checkout-session', async (req, res) => {
     productName: productName,
     sellerName: sellerName,
     sellerEmail: sellerEmail,
+    userId: userId || '',
     paidAmount: parseInt(price * quantity),
     paidAt: new Date().toISOString(),
-    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
-    phoneNumber: phoneNumber || "",
-    breakdown: breakdown ? JSON.stringify(breakdown) : "{}",
+    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : '{}',
+    phoneNumber: phoneNumber || '',
+    breakdown: breakdown ? JSON.stringify(breakdown) : '{}',
   };
 
   // Construct line items based on breakdown if available
   let line_items = [];
   if (breakdown) {
-     // Product Price
-     line_items.push({
+    // Product Price
+    line_items.push({
+      price_data: {
+        currency: 'USD',
+        unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
+        product_data: {
+          name: productName,
+          description: `Sold by: ${sellerName}`,
+        },
+      },
+      quantity: 1,
+    });
+    // Shipping
+    if (breakdown.shipping > 0) {
+      line_items.push({
         price_data: {
           currency: 'USD',
-          unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
-          product_data: {
-            name: productName,
-            description: `Sold by: ${sellerName}`,
-          },
+          product_data: { name: 'International Shipping' },
+          unit_amount: parseInt(breakdown.shipping * 100),
         },
         quantity: 1,
-     });
-     // Shipping
-      if (breakdown.shipping > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'International Shipping' }, unit_amount: parseInt(breakdown.shipping * 100) },
-            quantity: 1,
-        });
-      }
-      // Customs
-      if (breakdown.customs > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'Est. Customs & Duty' }, unit_amount: parseInt(breakdown.customs * 100) },
-            quantity: 1,
-        });
-      }
-       // Platform Fee
-      if (breakdown.platform > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'Platform Fee' }, unit_amount: parseInt(breakdown.platform * 100) },
-            quantity: 1,
-        });
-      }
+      });
+    }
+    // Customs
+    if (breakdown.customs > 0) {
+      line_items.push({
+        price_data: {
+          currency: 'USD',
+          product_data: { name: 'Est. Customs & Duty' },
+          unit_amount: parseInt(breakdown.customs * 100),
+        },
+        quantity: 1,
+      });
+    }
+    // Platform Fee
+    if (breakdown.platform > 0) {
+      line_items.push({
+        price_data: {
+          currency: 'USD',
+          product_data: { name: 'Platform Fee' },
+          unit_amount: parseInt(breakdown.platform * 100),
+        },
+        quantity: 1,
+      });
+    }
   } else {
     // Fallback
     line_items = [
@@ -168,6 +183,41 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
       .db('UnityShopDB')
       .collection('paidOrders')
       .insertOne(orderData);
+
+    // ─── BACKEND CART CLEARING (Redundancy if frontend fails) ───────────────
+    // If userId is provided in metadata, clear all the purchased items from cart
+    if (metadata.userId && metadata.productId) {
+      try {
+        const userId = metadata.userId;
+        const productIds = metadata.productId.split(',').map(id => id.trim());
+
+        // Extract product IDs (they might be comma-separated)
+        // Clear each product from the user's cart
+        for (const prodId of productIds) {
+          try {
+            const objectId = new ObjectId(prodId);
+            await req.dbclient
+              .db('UnityShopDB')
+              .collection('carts')
+              .updateOne(
+                { userId: new ObjectId(userId) },
+                { $pull: { items: { productId: objectId } } },
+              );
+            console.log(
+              `[Payment] Cleared product ${prodId} from cart for user ${userId}`,
+            );
+          } catch (err) {
+            console.warn(
+              `[Payment] Could not clear product ${prodId}:`,
+              err.message,
+            );
+          }
+        }
+      } catch (err) {
+        console.error('[Payment] Error clearing cart from backend:', err);
+        // Don't fail the order for this
+      }
+    }
 
     // ─── Real-time Notifications ──────────────────────────────
     const notifCollection = req.dbclient
