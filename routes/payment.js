@@ -1,16 +1,21 @@
 const express = require('express');
 const router = express.Router();
-require("dotenv").config();
-const crypto = require("crypto");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-// app.use(express.static("public"));
+require('dotenv').config();
+const crypto = require('crypto');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 function generateTracingId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+// ─── Helper: calculate estimated delivery (5 days from now) ───
+function calculateEstimatedDelivery() {
+  const date = new Date();
+  date.setDate(date.getDate() + 5);
+  return date;
+}
 
-router.post("/create-checkout-session", async (req, res) => {
+router.post('/create-checkout-session', async (req, res) => {
   const {
     price,
     productId,
@@ -19,7 +24,11 @@ router.post("/create-checkout-session", async (req, res) => {
     userEmail,
     sellerName,
     sellerEmail,
+    shippingAddress, // New
+    phoneNumber,     // New
+    breakdown,       // New: { shipping, customs, platform, subtotal }
   } = req.body;
+
   const metadataObject = {
     productId: productId,
     productName: productName,
@@ -27,12 +36,51 @@ router.post("/create-checkout-session", async (req, res) => {
     sellerEmail: sellerEmail,
     paidAmount: parseInt(price * quantity),
     paidAt: new Date().toISOString(),
+    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
+    phoneNumber: phoneNumber || "",
+    breakdown: breakdown ? JSON.stringify(breakdown) : "{}",
   };
-  const session = await stripe.checkout.sessions.create({
-    // ui_mode: "custom",
-    line_items: [
+
+  // Construct line items based on breakdown if available
+  let line_items = [];
+  if (breakdown) {
+     // Product Price
+     line_items.push({
+        price_data: {
+          currency: 'USD',
+          unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
+          product_data: {
+            name: productName,
+            description: `Sold by: ${sellerName}`,
+          },
+        },
+        quantity: 1,
+     });
+     // Shipping
+      if (breakdown.shipping > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'International Shipping' }, unit_amount: parseInt(breakdown.shipping * 100) },
+            quantity: 1,
+        });
+      }
+      // Customs
+      if (breakdown.customs > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'Est. Customs & Duty' }, unit_amount: parseInt(breakdown.customs * 100) },
+            quantity: 1,
+        });
+      }
+       // Platform Fee
+      if (breakdown.platform > 0) {
+        line_items.push({
+            price_data: { currency: 'USD', product_data: { name: 'Platform Fee' }, unit_amount: parseInt(breakdown.platform * 100) },
+            quantity: 1,
+        });
+      }
+  } else {
+    // Fallback
+    line_items = [
       {
-        // Provide the exact Price ID (for example, price_1234) of the product you want to sell
         price_data: {
           currency: 'USD',
           unit_amount: parseInt(price * 100),
@@ -43,10 +91,13 @@ router.post("/create-checkout-session", async (req, res) => {
         },
         quantity: parseInt(quantity),
       },
-    ],
+    ];
+  }
+
+  const session = await stripe.checkout.sessions.create({
+    line_items: line_items,
     customer_email: userEmail,
     metadata: metadataObject,
-
     mode: 'payment',
     success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.SITE_DOMAIN}/payment-cancel`,
@@ -55,30 +106,35 @@ router.post("/create-checkout-session", async (req, res) => {
   res.send({ url: session.url });
 });
 
-router.patch("/retrivedsessionAfterPayment", async (req, res) => {
+router.patch('/retrivedsessionAfterPayment', async (req, res) => {
   const { session_id } = req.query;
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log("retrivedsessionAfterPayment/:", session);
+    console.log('retrivedsessionAfterPayment/:', session);
+
     const amountpaid = session.amount_total / 100;
     const customerEmail = session.customer_email;
     const CustomerName = session.customer_details.name;
     const metadata = session.metadata;
-    const paymentintent =
-      session.payment_intent; /* I will use it ass like transition id*/
-    const presentment_details =
-      session.presentment_details; /* Local amout here*/
+    const paymentintent = session.payment_intent;
+    const presentment_details = session.presentment_details;
     const paymentStatus = session.payment_status;
     const cancelUrl = session.cancel_url;
+
+    // Prevent duplicate order processing
     const IsExist = await req.dbclient
-      .db("UnityShopDB")
-      .collection("paidOrders")
-      .findOne({ transitionId: paymentintent }); // Fixed casing: transitionId
+      .db('UnityShopDB')
+      .collection('paidOrders')
+      .findOne({ transitionId: paymentintent });
+
     if (IsExist) {
-      return res.status(200).json({ message: "Order already processed." });
+      return res.status(200).json({ message: 'Order already processed.' });
     }
 
+    // ─────────────────────────────────────────────────────────
+    // ORDER DATA — tracking fields added here
+    // ─────────────────────────────────────────────────────────
     const orderData = {
       amountPaid: amountpaid,
       customerEmail,
@@ -88,41 +144,61 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       productName: metadata.productName,
       sellerName: metadata.sellerName,
       sellerEmail: metadata.sellerEmail,
-      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1, // Ensure number division
+      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1,
       paymentStatus,
-      status: "New",
+
+      // ── Order Tracking Fields (NEW) ────────────────────────
+      status: 'New',
+      deliveryPartner: 'Pathao Courier',
+      estimatedDeliveryDate: calculateEstimatedDelivery(),
+      statusHistory: [
+        {
+          status: 'New',
+          label: 'Order Confirmed',
+          updatedAt: new Date(),
+        },
+      ],
+      // ──────────────────────────────────────────────────────
+
       createdAt: new Date(),
     };
+    // ─────────────────────────────────────────────────────────
 
     const result = await req.dbclient
-      .db("UnityShopDB")
-      .collection("paidOrders")
+      .db('UnityShopDB')
+      .collection('paidOrders')
       .insertOne(orderData);
 
-    // ─── Real-time Notifications ───────────────────────────────────────────────
-    const notifCollection = req.dbclient.db("UnityShopDB").collection("notifications");
+    // ─── Real-time Notifications ──────────────────────────────
+    const notifCollection = req.dbclient
+      .db('UnityShopDB')
+      .collection('notifications');
 
     // 1. Notify Customer: Payment Successful / Order Confirmed
     if (customerEmail) {
       const customerNotif = {
-        email: customerEmail, // Ensure this matches user's session email
-        type: "payment_success",
-        title: "Order Confirmed!",
+        email: customerEmail,
+        type: 'payment_success',
+        title: 'Order Confirmed!',
         message: `Payment successful for ${metadata.productName}. Amount: $${amountpaid}`,
         read: false,
         createdAt: new Date(),
       };
-      
+
       try {
         await notifCollection.insertOne(customerNotif);
         if (req.io) {
-            console.log(`Emitting payment_success to ${customerEmail.toLowerCase()}`);
-            req.io.to(customerEmail.toLowerCase()).emit("notification", customerNotif);
+          console.log(
+            `Emitting payment_success to ${customerEmail.toLowerCase()}`,
+          );
+          req.io
+            .to(customerEmail.toLowerCase())
+            .emit('notification', customerNotif);
         } else {
-            console.error("Socket.io instance not found on request object!");
+          console.error('Socket.io instance not found on request object!');
         }
       } catch (err) {
-        console.error("Error sending customer notification:", err);
+        console.error('Error sending customer notification:', err);
       }
     }
 
@@ -130,29 +206,30 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     if (metadata.sellerEmail) {
       const sellerNotif = {
         email: metadata.sellerEmail,
-        type: "order_confirmed",
-        title: "New Order Received!",
+        type: 'order_confirmed',
+        title: 'New Order Received!',
         message: `Start packing! You sold ${metadata.productName} to ${CustomerName}.`,
         read: false,
         createdAt: new Date(),
       };
-      
+
       try {
         await notifCollection.insertOne(sellerNotif);
         if (req.io) {
-             console.log(`Emitting order_confirmed to ${metadata.sellerEmail.toLowerCase()}`);
-             req.io.to(metadata.sellerEmail.toLowerCase()).emit("notification", sellerNotif);
+          console.log(
+            `Emitting order_confirmed to ${metadata.sellerEmail.toLowerCase()}`,
+          );
+          req.io
+            .to(metadata.sellerEmail.toLowerCase())
+            .emit('notification', sellerNotif);
         }
       } catch (err) {
-        console.error("Error sending seller notification:", err);
+        console.error('Error sending seller notification:', err);
       }
     }
 
-
-
     res.send({
       status: session.status,
-
       payment_status: session.payment_status,
       metadata: session.metadata,
       customer_email: session.customer_email,

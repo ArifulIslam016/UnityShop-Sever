@@ -5,6 +5,227 @@ const router = express.Router();
 const DB_NAME = "UnityShopDB";
 const ORDERS_COLLECTION = "paidOrders";
 const PRODUCTS_COLLECTION = "products";
+const STATUS_STEPS = ["New", "Processing", "Shipped", "Delivered"];
+
+// Assign delivery man to order
+router.put("/assign/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deliveryManId } = req.body;
+
+    const result = await req.dbclient
+      .db(DB_NAME)
+      .collection(ORDERS_COLLECTION)
+      .updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            deliveryManId: deliveryManId,
+            status: "Shipped",
+            updatedAt: new Date(),
+          },
+          $push: {
+            statusHistory: {
+              status: "Shipped",
+              label: "Out for Delivery",
+              updatedAt: new Date(),
+            },
+          },
+        },
+      );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// Get orders assigned to the logged-in delivery man
+router.get("/my-deliveries/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const orders = await req.dbclient
+      .db(DB_NAME)
+      .collection(ORDERS_COLLECTION)
+      .find({ deliveryManId: userId })
+      .toArray();
+    res.send(orders);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+// ROUTE 1: GET /orders/track/:id
+// Purpose: Fetch a single order by ID for the tracking view
+// Used by: User dashboard → My Orders → Track button
+router.get("/track/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid order ID" });
+    }
+
+    const order = await req.dbclient
+      .db(DB_NAME)
+      .collection(ORDERS_COLLECTION)
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // If old order has no statusHistory, build it on the fly
+    // so old orders don't break the tracking UI
+    if (!order.statusHistory || order.statusHistory.length === 0) {
+      order.statusHistory = [
+        {
+          status: order.status || "New",
+          label: "Order Confirmed",
+          updatedAt: order.createdAt || new Date(),
+        },
+      ];
+    }
+
+    // If no estimatedDeliveryDate, generate one on the fly
+    if (!order.estimatedDeliveryDate) {
+      const est = new Date(order.createdAt || new Date());
+      est.setDate(est.getDate() + 5);
+      order.estimatedDeliveryDate = est;
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error("Failed to fetch order for tracking:", error);
+    res.status(500).json({ error: "Failed to fetch order" });
+  }
+});
+
+// ROUTE 2: PATCH /orders/track/:id/status
+// Purpose: Admin updates order status + pushes to history
+// Used by: Admin dashboard → Orders Management
+router.patch("/track/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, deliveryPartner } = req.body;
+
+    // Validate the status
+    if (!STATUS_STEPS.includes(status) && status !== "Cancelled") {
+      return res.status(400).json({
+        error: `Invalid status. Allowed: ${[...STATUS_STEPS, "Cancelled"].join(", ")}`,
+      });
+    }
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid order ID" });
+    }
+
+    const db = req.dbclient.db(DB_NAME);
+
+    // Fetch order first — needed for notifications
+    const order = await db
+      .collection(ORDERS_COLLECTION)
+      .findOne({ _id: new ObjectId(id) });
+
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Build history entry
+    const historyEntry = {
+      status,
+      label: getStatusLabel(status),
+      updatedAt: new Date(),
+    };
+
+    // Build update fields
+    const updateFields = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    if (deliveryPartner) {
+      updateFields.deliveryPartner = deliveryPartner;
+    }
+
+    const result = await db.collection(ORDERS_COLLECTION).updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: updateFields,
+        $push: { statusHistory: historyEntry },
+      },
+    );
+
+    // ── Notify buyer in real-time ─────────────────────────────
+    if (req.io && order.customerEmail) {
+      const buyerEmail = order.customerEmail;
+
+      const notification = {
+        email: buyerEmail,
+        type: "order_status",
+        title: `Order ${getStatusLabel(status)}`,
+        message: `Your order for "${order.productName || "your item"}" is now "${getStatusLabel(status)}".`,
+        meta: { orderId: id, status },
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(notification);
+      req.io.to(buyerEmail.toLowerCase()).emit("notification", notification);
+
+      // Dedicated tracking event — frontend stepper listens to this
+      req.io.to(buyerEmail.toLowerCase()).emit("orderTrackingUpdated", {
+        orderId: id,
+        status,
+        historyEntry,
+      });
+    }
+
+    // ── Notify seller on Delivered or Cancelled ───────────────
+    if (
+      req.io &&
+      order.sellerEmail &&
+      (status === "Delivered" || status === "Cancelled")
+    ) {
+      const sellerNotif = {
+        email: order.sellerEmail,
+        type: "order_status",
+        title: `Order ${getStatusLabel(status)}`,
+        message: `Order for "${order.productName}" from ${order.customerName || order.customerEmail} is now "${getStatusLabel(status)}".`,
+        meta: { orderId: id, status },
+        read: false,
+        createdAt: new Date(),
+      };
+
+      await db.collection("notifications").insertOne(sellerNotif);
+      req.io
+        .to(order.sellerEmail.toLowerCase())
+        .emit("notification", sellerNotif);
+    }
+
+    res.json({
+      message: "Order status updated successfully",
+      status,
+      historyEntry,
+      result,
+    });
+  } catch (error) {
+    console.error("Failed to update tracking status:", error);
+    res.status(500).json({ error: "Failed to update order status" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Helper: human-readable label for each status
+function getStatusLabel(status) {
+  const labels = {
+    New: "Order Confirmed",
+    Processing: "Being Packed",
+    Shipped: "Shipped",
+    Delivered: "Delivered",
+    Cancelled: "Cancelled",
+  };
+  return labels[status] || status;
+}
 
 // Get orders - filter by sellerEmail or customerEmail
 router.get("/", async (req, res) => {
@@ -104,6 +325,7 @@ router.get("/seller-stats", async (req, res) => {
   }
 });
 
+//
 // Get user stats (order count, total spent, pending count)
 router.get("/user-stats", async (req, res) => {
   try {
