@@ -78,6 +78,7 @@ const productRoutes = require("./routes/product");
 const catRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
+const adminStatsRoutes = require("./routes/adminStats");
 
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
@@ -96,6 +97,7 @@ app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
 app.use("/seller-requests", require("./routes/sellerRequests"));
 app.use("/group-buy", require("./routes/groupBuy"));
+app.use("/api/admin/stats", adminStatsRoutes);
 
 
 
