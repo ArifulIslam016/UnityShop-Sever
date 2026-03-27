@@ -1,4 +1,3 @@
-// models/Negotiation.js
 const mongoose = require("mongoose");
 
 const negotiationSchema = new mongoose.Schema(
@@ -18,14 +17,8 @@ const negotiationSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    offerPrice: {
-      type: Number,
-      required: true,
-    },
-    originalPrice: {
-      type: Number,
-      required: true,
-    },
+    offerPrice: { type: Number, required: true },
+    originalPrice: { type: Number, required: true },
     status: {
       type: String,
       enum: ["pending", "accepted", "rejected", "countered"],
