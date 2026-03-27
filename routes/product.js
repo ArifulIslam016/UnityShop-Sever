@@ -1,43 +1,43 @@
-const express = require('express');
-const { ObjectId } = require('mongodb');
+const express = require("express");
+const { ObjectId } = require("mongodb");
 const router = express.Router();
 
-const DB_NAME = 'UnityShopDB';
-const COLLECTION_NAME = 'products';
+const DB_NAME = "UnityShopDB";
+const COLLECTION_NAME = "products";
 
 // Get all categories with product counts
-router.get('/categories', async (req, res) => {
+router.get("/categories", async (req, res) => {
   try {
     const categories = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .aggregate([
-        { $group: { _id: '$category', count: { $sum: 1 } } },
+        { $group: { _id: "$category", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])
       .toArray();
 
-    const result = categories.map(c => ({
+    const result = categories.map((c) => ({
       name: c._id,
       count: c.count,
     }));
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch categories' });
+    res.status(500).send({ error: "Failed to fetch categories" });
   }
 });
 
 // Get recommended / featured products for homepage
-router.get('/recommended', async (req, res) => {
+router.get("/recommended", async (req, res) => {
   try {
-    const { sort = 'recommended', limit = '20' } = req.query;
+    const { sort = "recommended", limit = "20" } = req.query;
     const limitNum = Math.min(parseInt(limit) || 20, 50);
 
     let sortOption = {};
-    if (sort === 'latest') {
+    if (sort === "latest") {
       sortOption = { createdAt: -1 };
-    } else if (sort === 'top-rated') {
+    } else if (sort === "top-rated") {
       sortOption = { rating: -1, reviews: -1 };
     } else {
       sortOption = { rating: -1, reviews: -1, createdAt: -1 };
@@ -53,14 +53,14 @@ router.get('/recommended', async (req, res) => {
 
     res.send(products);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch recommended products' });
+    res.status(500).send({ error: "Failed to fetch recommended products" });
   }
 });
 
 // Get flash deal products
-router.get('/flash-deals', async (req, res) => {
+router.get("/flash-deals", async (req, res) => {
   try {
-    const { limit = '10' } = req.query;
+    const { limit = "10" } = req.query;
     const limitNum = Math.min(parseInt(limit) || 10, 20);
 
     const products = await req.dbclient
@@ -68,13 +68,13 @@ router.get('/flash-deals', async (req, res) => {
       .collection(COLLECTION_NAME)
       .find({
         originalPrice: { $exists: true, $gt: 0 },
-        $expr: { $lt: ['$price', '$originalPrice'] },
+        $expr: { $lt: ["$price", "$originalPrice"] },
       })
       .sort({ rating: -1 })
       .limit(limitNum)
       .toArray();
 
-    const result = products.map(p => ({
+    const result = products.map((p) => ({
       ...p,
       discount: Math.round(
         ((p.originalPrice - p.price) / p.originalPrice) * 100,
@@ -83,14 +83,14 @@ router.get('/flash-deals', async (req, res) => {
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch flash deals' });
+    res.status(500).send({ error: "Failed to fetch flash deals" });
   }
 });
 
 // Get new arrival products
-router.get('/new-arrivals', async (req, res) => {
+router.get("/new-arrivals", async (req, res) => {
   try {
-    const { limit = '10' } = req.query;
+    const { limit = "10" } = req.query;
     const limitNum = Math.min(parseInt(limit) || 10, 20);
 
     const products = await req.dbclient
@@ -103,23 +103,23 @@ router.get('/new-arrivals', async (req, res) => {
 
     res.send(products);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch new arrivals' });
+    res.status(500).send({ error: "Failed to fetch new arrivals" });
   }
 });
 
 // Get unique brands from products
-router.get('/brands', async (req, res) => {
+router.get("/brands", async (req, res) => {
   try {
     const brands = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .aggregate([
-        { $match: { brand: { $exists: true, $ne: '' } } },
+        { $match: { brand: { $exists: true, $ne: "" } } },
         {
           $group: {
-            _id: '$brand',
+            _id: "$brand",
             count: { $sum: 1 },
-            image: { $first: '$image' },
+            image: { $first: "$image" },
           },
         },
         { $sort: { count: -1 } },
@@ -127,7 +127,7 @@ router.get('/brands', async (req, res) => {
       ])
       .toArray();
 
-    const result = brands.map(b => ({
+    const result = brands.map((b) => ({
       name: b._id,
       count: b.count,
       image: b.image,
@@ -135,22 +135,22 @@ router.get('/brands', async (req, res) => {
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch brands' });
+    res.status(500).send({ error: "Failed to fetch brands" });
   }
 });
 
 // Search products with query, category, sort, pagination, price & rating filters
-router.get('/search', async (req, res) => {
+router.get("/search", async (req, res) => {
   try {
     const {
-      q = '',
-      category = '',
-      sort = 'recommended',
-      page = '1',
-      limit = '24',
-      priceMin = '',
-      priceMax = '',
-      rating = '0',
+      q = "",
+      category = "",
+      sort = "recommended",
+      page = "1",
+      limit = "24",
+      priceMin = "",
+      priceMax = "",
+      rating = "0",
     } = req.query;
 
     const pageNum = Math.max(parseInt(page) || 1, 1);
@@ -163,26 +163,26 @@ router.get('/search', async (req, res) => {
     if (q && q.trim()) {
       const words = q.trim().split(/\s+/).filter(Boolean);
       if (words.length === 1) {
-        const rx = words[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rx = words[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         matchQuery.$or = [
-          { name: { $regex: rx, $options: 'i' } },
-          { description: { $regex: rx, $options: 'i' } },
-          { brand: { $regex: rx, $options: 'i' } },
-          { category: { $regex: rx, $options: 'i' } },
-          { tags: { $regex: rx, $options: 'i' } },
-          { badge: { $regex: rx, $options: 'i' } },
+          { name: { $regex: rx, $options: "i" } },
+          { description: { $regex: rx, $options: "i" } },
+          { brand: { $regex: rx, $options: "i" } },
+          { category: { $regex: rx, $options: "i" } },
+          { tags: { $regex: rx, $options: "i" } },
+          { badge: { $regex: rx, $options: "i" } },
         ];
       } else {
-        matchQuery.$and = words.map(w => {
-          const rx = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        matchQuery.$and = words.map((w) => {
+          const rx = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           return {
             $or: [
-              { name: { $regex: rx, $options: 'i' } },
-              { description: { $regex: rx, $options: 'i' } },
-              { brand: { $regex: rx, $options: 'i' } },
-              { category: { $regex: rx, $options: 'i' } },
-              { tags: { $regex: rx, $options: 'i' } },
-              { badge: { $regex: rx, $options: 'i' } },
+              { name: { $regex: rx, $options: "i" } },
+              { description: { $regex: rx, $options: "i" } },
+              { brand: { $regex: rx, $options: "i" } },
+              { category: { $regex: rx, $options: "i" } },
+              { tags: { $regex: rx, $options: "i" } },
+              { badge: { $regex: rx, $options: "i" } },
             ],
           };
         });
@@ -190,7 +190,7 @@ router.get('/search', async (req, res) => {
     }
 
     if (category && category.trim()) {
-      matchQuery.category = { $regex: `^${category.trim()}$`, $options: 'i' };
+      matchQuery.category = { $regex: `^${category.trim()}$`, $options: "i" };
     }
 
     if (priceMin || priceMax) {
@@ -206,16 +206,16 @@ router.get('/search', async (req, res) => {
 
     let sortOption = {};
     switch (sort) {
-      case 'price-asc':
+      case "price-asc":
         sortOption = { price: 1 };
         break;
-      case 'price-desc':
+      case "price-desc":
         sortOption = { price: -1 };
         break;
-      case 'newest':
+      case "newest":
         sortOption = { createdAt: -1 };
         break;
-      case 'rating':
+      case "rating":
         sortOption = { rating: -1, reviews: -1 };
         break;
       default:
@@ -242,21 +242,18 @@ router.get('/search', async (req, res) => {
       totalPages: Math.ceil(totalCount / limitNum),
     });
   } catch (error) {
-    console.error('Search error:', error);
-    res.status(500).send({ error: 'Failed to search products' });
+    console.error("Search error:", error);
+    res.status(500).send({ error: "Failed to search products" });
   }
 });
 
 // ─── Increment persistent view count ────────────────────────────────────────
-// POST /products/:id/view
-// Called once when a user opens a product page.
-// Atomically increments the `views` field in MongoDB.
-router.post('/:id/view', async (req, res) => {
+router.post("/:id/view", async (req, res) => {
   try {
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid product ID' });
+      return res.status(400).json({ error: "Invalid product ID" });
     }
 
     const result = await req.dbclient
@@ -265,22 +262,22 @@ router.post('/:id/view', async (req, res) => {
       .findOneAndUpdate(
         { _id: new ObjectId(id) },
         { $inc: { views: 1 } },
-        { returnDocument: 'after' },
+        { returnDocument: "after" },
       );
 
     if (!result) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ error: "Product not found" });
     }
 
     res.json({ views: result.views ?? 1 });
   } catch (error) {
-    console.error('View count error:', error);
-    res.status(500).json({ error: 'Failed to update view count' });
+    console.error("View count error:", error);
+    res.status(500).json({ error: "Failed to update view count" });
   }
 });
 
 // Get all products with optional category and seller email filtering
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { category, sellerEmail } = req.query;
     let query = {};
@@ -297,30 +294,67 @@ router.get('/', async (req, res) => {
 
     res.send(products);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to fetch products' });
+    res.status(500).send({ error: "Failed to fetch products" });
   }
 });
 
-// Get a single product by ID
-router.get('/:id', async (req, res) => {
+// Get single product by ID (with seller lookup)
+router.get("/:id", async (req, res) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid product ID" });
+    }
+
     const product = await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
       .findOne({ _id: new ObjectId(id) });
 
     if (!product) {
-      return res.status(404).send({ error: 'Product not found' });
+      return res.status(404).json({ error: "Product not found" });
     }
-    res.send(product);
+
+    // Look up the seller from the users collection using sellerEmail
+    if (product.sellerEmail) {
+      const user = await req.dbclient
+        .db(DB_NAME)
+        .collection("users")
+        .findOne(
+          { email: product.sellerEmail },
+          { projection: { _id: 1, name: 1, email: 1 } },
+        );
+
+      if (user) {
+        product.seller = {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+        };
+      } else {
+        product.seller = {
+          _id: null,
+          name: product.sellerName || "Unknown",
+          email: product.sellerEmail,
+        };
+      }
+    } else {
+      product.seller = {
+        _id: null,
+        name: product.sellerName || "Unknown",
+        email: "",
+      };
+    }
+
+    res.json(product);
   } catch (error) {
-    res.status(500).send({ error: 'Invalid ID format' });
+    console.error("Error fetching product:", error);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // Create a new product
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const productData = req.body;
 
@@ -331,9 +365,9 @@ router.post('/', async (req, res) => {
       rating: Number(productData.rating || 0),
       reviews: Number(productData.reviews || 0),
       stock: Number(productData.stock || 0),
-      views: 0, // ← initialize view count to 0 on creation
+      views: 0,
       createdAt: new Date(),
-      endAt:productData.endAt,
+      endAt: productData.endAt,
       basePrice: Number(productData.basePrice || productData.price || 0),
       currentHighestBId: Number(
         productData.basePrice || productData.price || 0,
@@ -347,12 +381,12 @@ router.post('/', async (req, res) => {
 
     res.status(201).send(result);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to create product' });
+    res.status(500).send({ error: "Failed to create product" });
   }
 });
 
 // Update product details
-router.patch('/:id', async (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const db = req.dbclient.db(DB_NAME);
@@ -370,14 +404,14 @@ router.patch('/:id', async (req, res) => {
     if (
       product &&
       req.body.status &&
-      (req.body.status === 'approved' || req.body.status === 'rejected')
+      (req.body.status === "approved" || req.body.status === "rejected")
     ) {
-      const isApproved = req.body.status === 'approved';
+      const isApproved = req.body.status === "approved";
 
       const notification = {
         email: product.sellerEmail,
-        type: isApproved ? 'product_approved' : 'product_rejected',
-        title: isApproved ? 'Product Approved!' : 'Product Rejected',
+        type: isApproved ? "product_approved" : "product_rejected",
+        title: isApproved ? "Product Approved!" : "Product Rejected",
         message: isApproved
           ? `Your product "${product.name}" has been approved and is now live.`
           : `Your product "${product.name}" has been rejected. Please review and resubmit.`,
@@ -386,24 +420,24 @@ router.patch('/:id', async (req, res) => {
         createdAt: new Date(),
       };
 
-      await db.collection('notifications').insertOne(notification);
+      await db.collection("notifications").insertOne(notification);
 
       if (req.io) {
         req.io
           .to(product.sellerEmail.toLowerCase())
-          .emit('notification', notification);
+          .emit("notification", notification);
       }
     }
 
     res.send(result);
   } catch (error) {
     console.error(error);
-    res.status(500).send({ error: 'Failed to update product' });
+    res.status(500).send({ error: "Failed to update product" });
   }
 });
 
 // Delete product
-router.delete('/:id', async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const result = await req.dbclient
@@ -413,7 +447,7 @@ router.delete('/:id', async (req, res) => {
 
     res.send(result);
   } catch (error) {
-    res.status(500).send({ error: 'Failed to delete product' });
+    res.status(500).send({ error: "Failed to delete product" });
   }
 });
 

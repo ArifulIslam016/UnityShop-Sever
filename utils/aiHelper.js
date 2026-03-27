@@ -1,4 +1,3 @@
-// utils/aiHelper.js
 function generateAIMessage(originalPrice, offerPrice, userMessage) {
   const discount = ((originalPrice - offerPrice) / originalPrice) * 100;
   let aiResponse = "";

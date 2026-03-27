@@ -4,9 +4,11 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion } = require("mongodb");
+const mongoose = require("mongoose");
 
 const app = express();
 const port = process.env.PORT || 5000;
+const DEBUG_SOCKET = process.env.DEBUG_SOCKET === "true";
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -29,9 +31,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// MongoDB Connection
+// ================= MongoDB Connection =================
 const uri = process.env.MONGODB_URL;
-
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -40,32 +41,36 @@ const client = new MongoClient(uri, {
   },
 });
 
-let connectionPromise = null;
+let isConnected = false;
+let dbClient = null;
 
 async function connectToDatabase() {
-  if (!connectionPromise) {
-    connectionPromise = client.connect().then(() => {
-      console.log("Successfully connected to MongoDB!");
-      runAuctionCheck(client); // Start the scheduled task for auction checks
-      return client;
+  if (!isConnected) {
+    await client.connect();
+    // Connect Mongoose
+    await mongoose.connect(uri, {
+      serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+      },
     });
+    isConnected = true;
+    dbClient = client;
+    console.log("✅ Successfully connected to MongoDB!");
+    const runAuctionCheck = require("./routes/scheduledTask");
+    runAuctionCheck(client); // Start the scheduled task for auction checks
   }
-  return connectionPromise;
+  return dbClient;
 }
 
-// Ensure DB connected before request
-app.use(async (req, res, next) => {
-  try {
-    await connectToDatabase();
-    req.dbclient = client;
-    next();
-  } catch (error) {
-    console.error("MongoDB connection error:", error);
-    res.status(500).json({ error: "Database connection failed" });
-  }
+// Attach db client to every request (already connected)
+app.use((req, res, next) => {
+  req.dbclient = dbClient;
+  next();
 });
 
-// Routes
+// ================= Routes =================
 const aboutRoutes = require("./routes/about");
 const contactRoutes = require("./routes/contact");
 const homeRoutes = require("./routes/home");
@@ -75,13 +80,11 @@ const cartRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
 const promoRoutes = require("./routes/promo");
-const runAuctionCheck = require("./routes/scheduledTask");
-// Root endpoint
+
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
 });
 
-// Route handlers
 app.use("/about", aboutRoutes);
 app.use("/contact", contactRoutes);
 app.use("/home", homeRoutes);
@@ -99,45 +102,51 @@ app.use("/group-buy", require("./routes/groupBuy"));
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
 app.use("/bids", require("./routes/bids"));
-// app.use('/scheduled-tasks', require('./routes/scheduledTask'));
 
-// 🚀 AI Routes
+// AI Routes
 const aiRoutes = require("./routes/ai");
 app.use("/api/ai", aiRoutes);
 
-// Import Socket Handlers
+// Negotiation Routes
+const negotiationRoutes = require("./routes/negotiations");
+app.use("/api/negotiations", negotiationRoutes);
+
+// ================= Socket Handlers =================
 const productViewerSocket = require("./sockets/productViewer");
 
-// Socket Connection
 io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
-
-  // General room join system
+  if (DEBUG_SOCKET) {
+    console.log("Client connected:", socket.id);
+  }
   socket.on("join", (room) => {
     if (room) {
       socket.join(room);
-      console.log(`Socket ${socket.id} joined room: ${room}`);
+      if (DEBUG_SOCKET) {
+        console.log(`Socket ${socket.id} joined room: ${room}`);
+      }
     }
   });
-
-  // Product live viewer tracking
   productViewerSocket(io, socket);
-
   socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+    if (DEBUG_SOCKET) {
+      console.log("Client disconnected:", socket.id);
+    }
   });
 });
 
-// Start Server
-// Start Server and Database Connection immediately
-server.listen(port, async () => {
-  console.log(`Server running on port ${port}`);
+// ================= Start Server after DB Connection =================
+async function startServer() {
   try {
-    // Ensure DB connection is established at startup
-    // সার্ভার চালু হওয়ার সাথে সাথেই ডাটাবেস কানেক্ট করবে এবং ক্রন জব শুরু করবে
-    await connectToDatabase();
+    await connectToDatabase(); // Wait for DB connection
+    server.listen(port, () => {
+      console.log(`🚀 Server running on port ${port}`);
+    });
   } catch (err) {
-    console.error("Initial DB connection failed:", err);
+    console.error("❌ Failed to connect to database:", err);
+    process.exit(1);
   }
-});
+}
+
+startServer();
+
 module.exports = app;
