@@ -25,7 +25,11 @@ router.get("/:userId", async (req, res) => {
           productId: "$items.productId",
           quantity: "$items.quantity",
           name: "$productDetails.name",
-          price: "$productDetails.price",
+          price: { $ifNull: ["$items.customPrice", "$productDetails.price"] },
+          originalPrice: {
+            $ifNull: ["$items.originalPrice", "$productDetails.price"],
+          },
+          pricingType: { $ifNull: ["$items.pricingType", "standard"] },
           image: "$productDetails.image",
           stock: "$productDetails.stock",
           moq: "$productDetails.moq",
@@ -55,7 +59,23 @@ router.get("/:userId", async (req, res) => {
  *  is less the quantity and  quantity positive value(+) is increase quantity
  * when quantity is less then 1 the minus (-) button  will be disabled*/
 router.post("/add", async (req, res) => {
-  const { userId, productId, quantity } = req.body;
+  const {
+    userId,
+    productId,
+    quantity,
+    overridePrice,
+    originalPrice,
+    pricingType,
+  } = req.body;
+
+  const parsedOverridePrice =
+    overridePrice !== undefined && overridePrice !== null
+      ? Number(overridePrice)
+      : null;
+  const hasOverridePrice =
+    parsedOverridePrice !== null &&
+    Number.isFinite(parsedOverridePrice) &&
+    parsedOverridePrice > 0;
 
   const query = {
     userId: new ObjectId(userId),
@@ -93,6 +113,14 @@ router.post("/add", async (req, res) => {
       $inc: { "items.$.quantity": quantity },
       $set: { updatedAt: new Date() },
     };
+
+    if (hasOverridePrice) {
+      updateDoc.$set["items.$.customPrice"] = parsedOverridePrice;
+      updateDoc.$set["items.$.originalPrice"] =
+        Number(originalPrice) || parsedOverridePrice;
+      updateDoc.$set["items.$.pricingType"] = pricingType || "negotiated";
+    }
+
     await req.dbclient
       .db(DB_NAME)
       .collection(COLLECTION_NAME)
@@ -100,8 +128,19 @@ router.post("/add", async (req, res) => {
   } else {
     //New Items will added from here if there is no item in card with same product of this user.
     const filter = { userId: new ObjectId(userId) };
+    const newItem = {
+      productId: new ObjectId(productId),
+      quantity,
+    };
+
+    if (hasOverridePrice) {
+      newItem.customPrice = parsedOverridePrice;
+      newItem.originalPrice = Number(originalPrice) || parsedOverridePrice;
+      newItem.pricingType = pricingType || "negotiated";
+    }
+
     const updateDoc = {
-      $push: { items: { productId: new ObjectId(productId), quantity } },
+      $push: { items: newItem },
       $set: { updatedAt: new Date() },
     };
     await req.dbclient

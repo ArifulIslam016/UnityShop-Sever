@@ -8,6 +8,7 @@ const mongoose = require("mongoose");
 
 const app = express();
 const port = process.env.PORT || 5000;
+const DEBUG_SOCKET = process.env.DEBUG_SOCKET === "true";
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -114,16 +115,22 @@ app.use("/api/negotiations", negotiationRoutes);
 const productViewerSocket = require("./sockets/productViewer");
 
 io.on("connection", (socket) => {
-  console.log("Client connected:", socket.id);
+  if (DEBUG_SOCKET) {
+    console.log("Client connected:", socket.id);
+  }
   socket.on("join", (room) => {
     if (room) {
       socket.join(room);
-      console.log(`Socket ${socket.id} joined room: ${room}`);
+      if (DEBUG_SOCKET) {
+        console.log(`Socket ${socket.id} joined room: ${room}`);
+      }
     }
   });
   productViewerSocket(io, socket);
   socket.on("disconnect", () => {
-    console.log("Client disconnected:", socket.id);
+    if (DEBUG_SOCKET) {
+      console.log("Client disconnected:", socket.id);
+    }
   });
 });
 

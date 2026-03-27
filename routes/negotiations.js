@@ -21,24 +21,14 @@ const buildStatusMessage = ({ status, offerPrice, productName }) => {
 // POST /api/negotiations – create a new negotiation
 router.post("/", auth, async (req, res) => {
   try {
-    console.log("📨 POST /negotiations - Request received");
-    console.log("Request body:", req.body);
-    console.log("Authenticated user (from token):", req.user);
-
     const { productId, productPrice, userMessage, sellerId } = req.body;
     if (!productId || !productPrice || !sellerId) {
-      console.warn("❌ Missing required fields:", {
-        productId,
-        productPrice,
-        sellerId,
-      });
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     // Extract offer amount
     const offerMatch = userMessage.match(/\$?(\d+(?:\.\d{2})?)/);
     const offerPrice = offerMatch ? parseFloat(offerMatch[1]) : null;
-    console.log("💰 Extracted offerPrice:", offerPrice);
     if (!offerPrice) {
       return res.status(400).json({ error: "No price detected in message" });
     }
@@ -66,7 +56,6 @@ router.post("/", auth, async (req, res) => {
     const result = await db
       .collection(NEGOTIATION_COLLECTION)
       .insertOne(negotiation);
-    console.log("✅ Negotiation saved with ID:", result.insertedId);
 
     // Generate AI response (simple rules)
     const discount = ((productPrice - offerPrice) / productPrice) * 100;
@@ -205,12 +194,6 @@ router.patch("/:id", auth, async (req, res) => {
   try {
     const { status } = req.body;
     const { id } = req.params;
-    console.log("[NEGOTIATION_PATCH] Request received", {
-      negotiationId: id,
-      status,
-      actorId: req.user?._id,
-      actorRole: req.user?.role,
-    });
 
     if (!["accepted", "rejected", "countered"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
@@ -258,13 +241,6 @@ router.patch("/:id", auth, async (req, res) => {
         },
       );
 
-    console.log("[NEGOTIATION_PATCH] Status updated", {
-      negotiationId: id,
-      matchedCount: statusUpdateResult.matchedCount,
-      modifiedCount: statusUpdateResult.modifiedCount,
-      newStatus: status,
-    });
-
     // Fetch buyer details
     const buyer = await db
       .collection("users")
@@ -292,44 +268,28 @@ router.patch("/:id", auth, async (req, res) => {
         .insertOne(notification);
       notification._id = insertResult.insertedId;
 
-      console.log("[NEGOTIATION_PATCH] Notification persisted", {
-        notificationId: insertResult.insertedId?.toString?.(),
-        buyerEmail: buyer.email,
-        notificationType: notification.type,
-      });
-
       // Emit real‑time notification via socket
       if (req.io) {
         const room = buyer.email.toLowerCase();
         req.io.to(room).emit("notification", notification);
+
+        const statusUpdateMessage =
+          status === "accepted"
+            ? `Your offer of $${negotiation.offerPrice} was accepted! You can now purchase at this price.`
+            : status === "rejected"
+              ? `Your offer of $${negotiation.offerPrice} was declined.`
+              : `Your offer status changed to ${status}.`;
+
         req.io.to(room).emit("negotiation_status_updated", {
           negotiationId: negotiation._id,
-          productId: negotiation.product,
+          productId: negotiation.product.toString(),
           status,
           offerPrice: negotiation.offerPrice,
           productName,
-          message: notification.message,
+          message: statusUpdateMessage,
           updatedAt: new Date(),
         });
-
-        console.log("[NEGOTIATION_PATCH] Socket events emitted", {
-          room,
-          events: ["notification", "negotiation_status_updated"],
-        });
-      } else {
-        console.warn("[NEGOTIATION_PATCH] req.io unavailable, emit skipped", {
-          negotiationId: id,
-          buyerEmail: buyer.email,
-        });
       }
-    } else {
-      console.warn(
-        "[NEGOTIATION_PATCH] Buyer not found; notification skipped",
-        {
-          negotiationId: id,
-          buyerId: negotiation.buyer?.toString?.(),
-        },
-      );
     }
 
     res.json({
