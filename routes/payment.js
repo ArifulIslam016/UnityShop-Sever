@@ -247,9 +247,6 @@ try {
       try {
         await notifCollection.insertOne(customerNotif);
         if (req.io) {
-          console.log(
-            `Emitting payment_success to ${customerEmail.toLowerCase()}`,
-          );
           req.io
             .to(customerEmail.toLowerCase())
             .emit("notification", customerNotif);
@@ -275,9 +272,6 @@ try {
       try {
         await notifCollection.insertOne(sellerNotif);
         if (req.io) {
-          console.log(
-            `Emitting order_confirmed to ${metadata.sellerEmail.toLowerCase()}`,
-          );
           req.io
             .to(metadata.sellerEmail.toLowerCase())
             .emit("notification", sellerNotif);
