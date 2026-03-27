@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 require("dotenv").config();
 const crypto = require("crypto");
+const { ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 function generateTracingId() {
@@ -35,6 +36,7 @@ router.post("/create-checkout-session", async (req, res) => {
     sellerName: sellerName,
     sellerEmail: sellerEmail,
     paidAmount: parseInt(price * quantity),
+    quantity:quantity,
     paidAt: new Date().toISOString(),
     shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
     phoneNumber: phoneNumber || "",
@@ -123,6 +125,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
+    // console.log("retrivedsessionAfterPayment/:", session);
 
     const amountpaid = session.amount_total / 100;
     const customerEmail = session.customer_email;
@@ -179,6 +182,51 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       .db("UnityShopDB")
       .collection("paidOrders")
       .insertOne(orderData);
+    // product quantity less here
+    // console.log(session.metadata)
+
+    // await req.dbclient
+    //   .db("UnityShopDB")
+    //   .collection("products") // Apnar product collection-er nam check kore niben
+    //   .updateOne(
+    //     { _id:new ObjectId(session.metadata.productId) },
+    //     { $inc: { stock: -parseInt(session.metadata.quantity) } }, // Database-er stock theke minus hobe
+    //   );
+
+// ১. আইডি এবং কোয়ান্টিটি আগে ভেরিয়েবলে নিন
+const targetProductId = session.metadata.productId;
+const buyQuantity = parseInt(session.metadata.quantity) || 1; 
+
+// console.log("Checking for Product ID:", targetProductId);
+// console.log("Quantity to reduce:", buyQuantity);
+
+try {
+  // ২. আপডেট অপারেশন
+  const updateResult = await req.dbclient
+    .db("UnityShopDB")
+    .collection("products")
+    .updateOne(
+      { _id: new ObjectId(targetProductId) }, 
+      { $inc: { stock: -buyQuantity } } 
+    );
+
+  // ৩. চেক করা আপডেট হলো কি না
+  if (updateResult.modifiedCount > 0) {
+    // console.log("stock reduced");
+  } else {
+    // console.log("No stock updated. Check if Product ID exists and quantity is valid.");
+  }
+} catch (dbError) {
+  // console.error("🛑 dbError.message);
+}
+
+
+
+// jjjjjjjjjjjjjjjjjjjjjjjjjjjj
+
+
+
+
 
     // ─── Real-time Notifications ──────────────────────────────
     const notifCollection = req.dbclient
@@ -202,6 +250,8 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
           req.io
             .to(customerEmail.toLowerCase())
             .emit("notification", customerNotif);
+        } else {
+          console.error("Socket.io instance not found on request object!");
         }
       } catch (err) {
         console.error("Error sending customer notification:", err);

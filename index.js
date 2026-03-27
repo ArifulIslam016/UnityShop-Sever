@@ -93,7 +93,7 @@ app.use("/users", usersRoutes);
 app.use("/auth", authRoutes);
 app.use("/payment", require("./routes/payment"));
 app.use("/products", productRoutes);
-app.use("/product", productRoutes);
+// app.use("/product", productRoutes);
 app.use("/orders", ordersRoutes);
 app.use("/cart", cartRoutes);
 app.use("/notifications", require("./routes/notifications"));
