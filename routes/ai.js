@@ -2,6 +2,7 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
+const { ObjectId } = require("mongodb");
 
 // In-memory cache
 const cache = new Map();
@@ -105,29 +106,34 @@ router.post("/support", auth, async (req, res) => {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // Build context from order or product (if provided)
+    // Build context from product if provided
     let context = "";
-    if (orderId) {
-      // Fetch order details from database (optional)
-      const order = await getOrderById(orderId); // you'll need to implement this
-      if (order) {
-        context = `
-Order ID: ${order._id}
-Status: ${order.status}
-Total: $${order.total}
-Items: ${order.items.map((i) => i.productName).join(", ")}
-Date: ${order.createdAt.toDateString()}
-        `;
-      }
-    }
-    if (productId && !orderId) {
-      // Fetch product details
-      const product = await getProductById(productId);
+    if (productId) {
+      const db = req.dbclient.db("UnityShopDB");
+      const product = await db
+        .collection("products")
+        .findOne({ _id: new ObjectId(productId) });
       if (product) {
         context = `
 Product: ${product.name}
 Category: ${product.category || "Not specified"}
 Price: $${product.price}
+Description: ${product.description?.slice(0, 200)}...
+        `;
+      }
+    } else if (orderId && req.user) {
+      const db = req.dbclient.db("UnityShopDB");
+      const order = await db.collection("orders").findOne({
+        _id: new ObjectId(orderId),
+        userId: req.user._id,
+      });
+      if (order) {
+        context = `
+Order ID: ${order._id}
+Status: ${order.status}
+Total: $${order.total}
+Items: ${order.items?.map((i) => i.productName).join(", ") || "N/A"}
+Date: ${order.createdAt?.toDateString() || "unknown"}
         `;
       }
     }
