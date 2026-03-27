@@ -1,11 +1,12 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-require('dotenv').config();
-const crypto = require('crypto');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+require("dotenv").config();
+const crypto = require("crypto");
+const { ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 function generateTracingId() {
-  return crypto.randomBytes(16).toString('hex');
+  return crypto.randomBytes(16).toString("hex");
 }
 
 // ─── Helper: calculate estimated delivery (5 days from now) ───
@@ -15,7 +16,7 @@ function calculateEstimatedDelivery() {
   return date;
 }
 
-router.post('/create-checkout-session', async (req, res) => {
+router.post("/create-checkout-session", async (req, res) => {
   const {
     price,
     productId,
@@ -25,8 +26,8 @@ router.post('/create-checkout-session', async (req, res) => {
     sellerName,
     sellerEmail,
     shippingAddress, // New
-    phoneNumber,     // New
-    breakdown,       // New: { shipping, customs, platform, subtotal }
+    phoneNumber, // New
+    breakdown, // New: { shipping, customs, platform, subtotal }
   } = req.body;
 
   const metadataObject = {
@@ -35,6 +36,7 @@ router.post('/create-checkout-session', async (req, res) => {
     sellerName: sellerName,
     sellerEmail: sellerEmail,
     paidAmount: parseInt(price * quantity),
+    quantity:quantity,
     paidAt: new Date().toISOString(),
     shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
     phoneNumber: phoneNumber || "",
@@ -44,45 +46,57 @@ router.post('/create-checkout-session', async (req, res) => {
   // Construct line items based on breakdown if available
   let line_items = [];
   if (breakdown) {
-     // Product Price
-     line_items.push({
+    // Product Price
+    line_items.push({
+      price_data: {
+        currency: "USD",
+        unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
+        product_data: {
+          name: productName,
+          description: `Sold by: ${sellerName}`,
+        },
+      },
+      quantity: 1,
+    });
+    // Shipping
+    if (breakdown.shipping > 0) {
+      line_items.push({
         price_data: {
-          currency: 'USD',
-          unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
-          product_data: {
-            name: productName,
-            description: `Sold by: ${sellerName}`,
-          },
+          currency: "USD",
+          product_data: { name: "International Shipping" },
+          unit_amount: parseInt(breakdown.shipping * 100),
         },
         quantity: 1,
-     });
-     // Shipping
-      if (breakdown.shipping > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'International Shipping' }, unit_amount: parseInt(breakdown.shipping * 100) },
-            quantity: 1,
-        });
-      }
-      // Customs
-      if (breakdown.customs > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'Est. Customs & Duty' }, unit_amount: parseInt(breakdown.customs * 100) },
-            quantity: 1,
-        });
-      }
-       // Platform Fee
-      if (breakdown.platform > 0) {
-        line_items.push({
-            price_data: { currency: 'USD', product_data: { name: 'Platform Fee' }, unit_amount: parseInt(breakdown.platform * 100) },
-            quantity: 1,
-        });
-      }
+      });
+    }
+    // Customs
+    if (breakdown.customs > 0) {
+      line_items.push({
+        price_data: {
+          currency: "USD",
+          product_data: { name: "Est. Customs & Duty" },
+          unit_amount: parseInt(breakdown.customs * 100),
+        },
+        quantity: 1,
+      });
+    }
+    // Platform Fee
+    if (breakdown.platform > 0) {
+      line_items.push({
+        price_data: {
+          currency: "USD",
+          product_data: { name: "Platform Fee" },
+          unit_amount: parseInt(breakdown.platform * 100),
+        },
+        quantity: 1,
+      });
+    }
   } else {
     // Fallback
     line_items = [
       {
         price_data: {
-          currency: 'USD',
+          currency: "USD",
           unit_amount: parseInt(price * 100),
           product_data: {
             name: productName,
@@ -98,7 +112,7 @@ router.post('/create-checkout-session', async (req, res) => {
     line_items: line_items,
     customer_email: userEmail,
     metadata: metadataObject,
-    mode: 'payment',
+    mode: "payment",
     success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.SITE_DOMAIN}/payment-cancel`,
   });
@@ -106,12 +120,12 @@ router.post('/create-checkout-session', async (req, res) => {
   res.send({ url: session.url });
 });
 
-router.patch('/retrivedsessionAfterPayment', async (req, res) => {
+router.patch("/retrivedsessionAfterPayment", async (req, res) => {
   const { session_id } = req.query;
 
   try {
     const session = await stripe.checkout.sessions.retrieve(session_id);
-    console.log('retrivedsessionAfterPayment/:', session);
+    // console.log("retrivedsessionAfterPayment/:", session);
 
     const amountpaid = session.amount_total / 100;
     const customerEmail = session.customer_email;
@@ -124,12 +138,12 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
 
     // Prevent duplicate order processing
     const IsExist = await req.dbclient
-      .db('UnityShopDB')
-      .collection('paidOrders')
+      .db("UnityShopDB")
+      .collection("paidOrders")
       .findOne({ transitionId: paymentintent });
 
     if (IsExist) {
-      return res.status(200).json({ message: 'Order already processed.' });
+      return res.status(200).json({ message: "Order already processed." });
     }
 
     // ─────────────────────────────────────────────────────────
@@ -148,13 +162,13 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
       paymentStatus,
 
       // ── Order Tracking Fields (NEW) ────────────────────────
-      status: 'New',
-      deliveryPartner: 'Pathao Courier',
+      status: "New",
+      deliveryPartner: "Pathao Courier",
       estimatedDeliveryDate: calculateEstimatedDelivery(),
       statusHistory: [
         {
-          status: 'New',
-          label: 'Order Confirmed',
+          status: "New",
+          label: "Order Confirmed",
           updatedAt: new Date(),
         },
       ],
@@ -165,21 +179,66 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
     // ─────────────────────────────────────────────────────────
 
     const result = await req.dbclient
-      .db('UnityShopDB')
-      .collection('paidOrders')
+      .db("UnityShopDB")
+      .collection("paidOrders")
       .insertOne(orderData);
+    // product quantity less here
+    // console.log(session.metadata)
+
+    // await req.dbclient
+    //   .db("UnityShopDB")
+    //   .collection("products") // Apnar product collection-er nam check kore niben
+    //   .updateOne(
+    //     { _id:new ObjectId(session.metadata.productId) },
+    //     { $inc: { stock: -parseInt(session.metadata.quantity) } }, // Database-er stock theke minus hobe
+    //   );
+
+// ১. আইডি এবং কোয়ান্টিটি আগে ভেরিয়েবলে নিন
+const targetProductId = session.metadata.productId;
+const buyQuantity = parseInt(session.metadata.quantity) || 1; 
+
+// console.log("Checking for Product ID:", targetProductId);
+// console.log("Quantity to reduce:", buyQuantity);
+
+try {
+  // ২. আপডেট অপারেশন
+  const updateResult = await req.dbclient
+    .db("UnityShopDB")
+    .collection("products")
+    .updateOne(
+      { _id: new ObjectId(targetProductId) }, 
+      { $inc: { stock: -buyQuantity } } 
+    );
+
+  // ৩. চেক করা আপডেট হলো কি না
+  if (updateResult.modifiedCount > 0) {
+    // console.log("stock reduced");
+  } else {
+    // console.log("No stock updated. Check if Product ID exists and quantity is valid.");
+  }
+} catch (dbError) {
+  // console.error("🛑 dbError.message);
+}
+
+
+
+// jjjjjjjjjjjjjjjjjjjjjjjjjjjj
+
+
+
+
 
     // ─── Real-time Notifications ──────────────────────────────
     const notifCollection = req.dbclient
-      .db('UnityShopDB')
-      .collection('notifications');
+      .db("UnityShopDB")
+      .collection("notifications");
 
     // 1. Notify Customer: Payment Successful / Order Confirmed
     if (customerEmail) {
       const customerNotif = {
         email: customerEmail,
-        type: 'payment_success',
-        title: 'Order Confirmed!',
+        type: "payment_success",
+        title: "Order Confirmed!",
         message: `Payment successful for ${metadata.productName}. Amount: $${amountpaid}`,
         read: false,
         createdAt: new Date(),
@@ -193,12 +252,12 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
           );
           req.io
             .to(customerEmail.toLowerCase())
-            .emit('notification', customerNotif);
+            .emit("notification", customerNotif);
         } else {
-          console.error('Socket.io instance not found on request object!');
+          console.error("Socket.io instance not found on request object!");
         }
       } catch (err) {
-        console.error('Error sending customer notification:', err);
+        console.error("Error sending customer notification:", err);
       }
     }
 
@@ -206,8 +265,8 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
     if (metadata.sellerEmail) {
       const sellerNotif = {
         email: metadata.sellerEmail,
-        type: 'order_confirmed',
-        title: 'New Order Received!',
+        type: "order_confirmed",
+        title: "New Order Received!",
         message: `Start packing! You sold ${metadata.productName} to ${CustomerName}.`,
         read: false,
         createdAt: new Date(),
@@ -221,10 +280,10 @@ router.patch('/retrivedsessionAfterPayment', async (req, res) => {
           );
           req.io
             .to(metadata.sellerEmail.toLowerCase())
-            .emit('notification', sellerNotif);
+            .emit("notification", sellerNotif);
         }
       } catch (err) {
-        console.error('Error sending seller notification:', err);
+        console.error("Error sending seller notification:", err);
       }
     }
 
