@@ -7,6 +7,17 @@ const DB_NAME = "UnityShopDB";
 const NEGOTIATION_COLLECTION = "negotiations";
 const NOTIFICATION_COLLECTION = "notifications";
 
+const getStatusText = (status) => {
+  if (status === "accepted") return "accepted";
+  if (status === "rejected") return "declined";
+  return status;
+};
+
+const buildStatusMessage = ({ status, offerPrice, productName }) => {
+  const statusText = getStatusText(status);
+  return `Seller ${statusText} your offer of $${offerPrice} for "${productName}".`;
+};
+
 // POST /api/negotiations – create a new negotiation
 router.post("/", auth, async (req, res) => {
   try {
@@ -160,13 +171,27 @@ router.get("/", auth, async (req, res) => {
 router.get("/user-product", auth, async (req, res) => {
   try {
     const { productId, buyerId } = req.query;
-    if (!productId || !buyerId) {
-      return res.status(400).json({ error: "productId and buyerId required" });
+    if (!productId) {
+      return res.status(400).json({ error: "productId is required" });
     }
+
+    const effectiveBuyerId = buyerId || req.user?._id;
+    if (!effectiveBuyerId) {
+      return res.status(400).json({ error: "buyerId could not be resolved" });
+    }
+
+    if (
+      req.user &&
+      req.user.role !== "admin" &&
+      req.user._id !== effectiveBuyerId
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const db = req.dbclient.db(DB_NAME);
     const negotiation = await db.collection(NEGOTIATION_COLLECTION).findOne({
       product: new ObjectId(productId),
-      buyer: new ObjectId(buyerId),
+      buyer: new ObjectId(effectiveBuyerId),
     });
     res.json(negotiation);
   } catch (error) {
@@ -180,6 +205,13 @@ router.patch("/:id", auth, async (req, res) => {
   try {
     const { status } = req.body;
     const { id } = req.params;
+    console.log("[NEGOTIATION_PATCH] Request received", {
+      negotiationId: id,
+      status,
+      actorId: req.user?._id,
+      actorRole: req.user?.role,
+    });
+
     if (!["accepted", "rejected", "countered"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
@@ -197,25 +229,48 @@ router.patch("/:id", auth, async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
+    const product = await db
+      .collection("products")
+      .findOne({ _id: negotiation.product });
+    const productName = product?.name || "the product";
+
+    const sellerStatusMessage = buildStatusMessage({
+      status,
+      offerPrice: negotiation.offerPrice,
+      productName,
+    });
+
     // Update status
-    await db
+    const statusUpdateResult = await db
       .collection(NEGOTIATION_COLLECTION)
       .updateOne(
         { _id: new ObjectId(id) },
-        { $set: { status, updatedAt: new Date() } },
+        {
+          $set: { status, updatedAt: new Date() },
+          $push: {
+            messages: {
+              sender: negotiation.seller,
+              message: sellerStatusMessage,
+              timestamp: new Date(),
+              system: true,
+            },
+          },
+        },
       );
+
+    console.log("[NEGOTIATION_PATCH] Status updated", {
+      negotiationId: id,
+      matchedCount: statusUpdateResult.matchedCount,
+      modifiedCount: statusUpdateResult.modifiedCount,
+      newStatus: status,
+    });
 
     // Fetch buyer details
     const buyer = await db
       .collection("users")
       .findOne({ _id: negotiation.buyer });
-    if (buyer) {
-      // Fetch product name for better message
-      const product = await db
-        .collection("products")
-        .findOne({ _id: negotiation.product });
-      const productName = product?.name || "the product";
 
+    if (buyer) {
       // Create notification for buyer
       const notification = {
         email: buyer.email,
@@ -232,15 +287,59 @@ router.patch("/:id", auth, async (req, res) => {
         read: false,
         createdAt: new Date(),
       };
-      await db.collection(NOTIFICATION_COLLECTION).insertOne(notification);
+      const insertResult = await db
+        .collection(NOTIFICATION_COLLECTION)
+        .insertOne(notification);
+      notification._id = insertResult.insertedId;
+
+      console.log("[NEGOTIATION_PATCH] Notification persisted", {
+        notificationId: insertResult.insertedId?.toString?.(),
+        buyerEmail: buyer.email,
+        notificationType: notification.type,
+      });
 
       // Emit real‑time notification via socket
       if (req.io) {
-        req.io.to(buyer.email.toLowerCase()).emit("notification", notification);
+        const room = buyer.email.toLowerCase();
+        req.io.to(room).emit("notification", notification);
+        req.io.to(room).emit("negotiation_status_updated", {
+          negotiationId: negotiation._id,
+          productId: negotiation.product,
+          status,
+          offerPrice: negotiation.offerPrice,
+          productName,
+          message: notification.message,
+          updatedAt: new Date(),
+        });
+
+        console.log("[NEGOTIATION_PATCH] Socket events emitted", {
+          room,
+          events: ["notification", "negotiation_status_updated"],
+        });
+      } else {
+        console.warn("[NEGOTIATION_PATCH] req.io unavailable, emit skipped", {
+          negotiationId: id,
+          buyerEmail: buyer.email,
+        });
       }
+    } else {
+      console.warn(
+        "[NEGOTIATION_PATCH] Buyer not found; notification skipped",
+        {
+          negotiationId: id,
+          buyerId: negotiation.buyer?.toString?.(),
+        },
+      );
     }
 
-    res.json({ success: true, negotiation: { ...negotiation, status } });
+    res.json({
+      success: true,
+      negotiation: {
+        ...negotiation,
+        status,
+        updatedAt: new Date(),
+      },
+    });
   } catch (error) {
     console.error("PATCH /negotiations/:id error:", error);
     res
