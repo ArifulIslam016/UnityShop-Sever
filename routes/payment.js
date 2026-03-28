@@ -214,7 +214,7 @@ try {
   if (updateResult.modifiedCount > 0) {
     // console.log("stock reduced");
   } else {
-    // console.log("No stock updated. Check if Product ID exists and quantity is valid.");
+    // console.log("No stockupdated. Check if Product ID exists and quantity is valid.");
   }
 } catch (dbError) {
   // console.error("🛑 dbError.message);
