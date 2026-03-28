@@ -5,7 +5,16 @@ const router = express.Router();
 const DB_NAME = "UnityShopDB";
 const ORDERS_COLLECTION = "paidOrders";
 const PRODUCTS_COLLECTION = "products";
-const STATUS_STEPS = ["New", "Processing", "Shipped", "Delivered"];
+const STATUS_STEPS = [
+  "placed",
+  "confirmed",
+  "packed",
+  "picked",
+  "inTransit",
+  "outForDelivery",
+  "delivered",
+  "cancelled",
+];
 
 // Assign delivery man to order
 router.put("/assign/:id", async (req, res) => {
@@ -21,15 +30,8 @@ router.put("/assign/:id", async (req, res) => {
         {
           $set: {
             deliveryManId: deliveryManId,
-            status: "Shipped",
+            assignedAt: new Date(),
             updatedAt: new Date(),
-          },
-          $push: {
-            statusHistory: {
-              status: "Shipped",
-              label: "Out for Delivery",
-              updatedAt: new Date(),
-            },
           },
         },
       );
@@ -38,6 +40,10 @@ router.put("/assign/:id", async (req, res) => {
     res.status(500).send(error);
   }
 });
+
+function normalizeStatus(status) {
+  return status || "placed";
+}
 
 // Get orders assigned to the logged-in delivery man
 router.get("/my-deliveries/:userId", async (req, res) => {
@@ -77,10 +83,11 @@ router.get("/track/:id", async (req, res) => {
     // If old order has no statusHistory, build it on the fly
     // so old orders don't break the tracking UI
     if (!order.statusHistory || order.statusHistory.length === 0) {
+      const fallbackStatus = normalizeStatus(order.status);
       order.statusHistory = [
         {
-          status: order.status || "New",
-          label: "Order Confirmed",
+          status: fallbackStatus,
+          label: fallbackStatus,
           updatedAt: order.createdAt || new Date(),
         },
       ];
@@ -107,11 +114,12 @@ router.patch("/track/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
     const { status, deliveryPartner } = req.body;
+    const allowed = STATUS_STEPS;
 
     // Validate the status
-    if (!STATUS_STEPS.includes(status) && status !== "Cancelled") {
+    if (!allowed.includes(status)) {
       return res.status(400).json({
-        error: `Invalid status. Allowed: ${[...STATUS_STEPS, "Cancelled"].join(", ")}`,
+        error: `Invalid status. Allowed: ${allowed.join(", ")}`,
       });
     }
 
@@ -130,16 +138,17 @@ router.patch("/track/:id/status", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    const nextStatus = normalizeStatus(status);
     // Build history entry
     const historyEntry = {
-      status,
-      label: getStatusLabel(status),
+      status: nextStatus,
+      label: nextStatus,
       updatedAt: new Date(),
     };
 
     // Build update fields
     const updateFields = {
-      status,
+      status: nextStatus,
       updatedAt: new Date(),
     };
 
@@ -162,9 +171,9 @@ router.patch("/track/:id/status", async (req, res) => {
       const notification = {
         email: buyerEmail,
         type: "order_status",
-        title: `Order ${getStatusLabel(status)}`,
-        message: `Your order for "${order.productName || "your item"}" is now "${getStatusLabel(status)}".`,
-        meta: { orderId: id, status },
+        title: `Order ${nextStatus}`,
+        message: `Your order for "${order.productName || "your item"}" is now "${nextStatus}".`,
+        meta: { orderId: id, status: nextStatus },
         read: false,
         createdAt: new Date(),
       };
@@ -175,7 +184,7 @@ router.patch("/track/:id/status", async (req, res) => {
       // Dedicated tracking event — frontend stepper listens to this
       req.io.to(buyerEmail.toLowerCase()).emit("orderTrackingUpdated", {
         orderId: id,
-        status,
+        status: nextStatus,
         historyEntry,
       });
     }
@@ -184,14 +193,14 @@ router.patch("/track/:id/status", async (req, res) => {
     if (
       req.io &&
       order.sellerEmail &&
-      (status === "Delivered" || status === "Cancelled")
+      (nextStatus === "delivered" || nextStatus === "cancelled")
     ) {
       const sellerNotif = {
         email: order.sellerEmail,
         type: "order_status",
-        title: `Order ${getStatusLabel(status)}`,
-        message: `Order for "${order.productName}" from ${order.customerName || order.customerEmail} is now "${getStatusLabel(status)}".`,
-        meta: { orderId: id, status },
+        title: `Order ${nextStatus}`,
+        message: `Order for "${order.productName}" from ${order.customerName || order.customerEmail} is now "${nextStatus}".`,
+        meta: { orderId: id, status: nextStatus },
         read: false,
         createdAt: new Date(),
       };
@@ -204,7 +213,7 @@ router.patch("/track/:id/status", async (req, res) => {
 
     res.json({
       message: "Order status updated successfully",
-      status,
+      status: nextStatus,
       historyEntry,
       result,
     });
@@ -546,17 +555,43 @@ router.patch("/:id", async (req, res) => {
   try {
     const id = req.params.id;
     const { status } = req.body;
+    const allowed = STATUS_STEPS;
 
     const db = req.dbclient.db(DB_NAME);
+
+    if (!allowed.includes(status)) {
+      return res.status(400).send({
+        error: `Invalid status. Allowed: ${allowed.join(", ")}`,
+      });
+    }
 
     // Get the order first so we can notify the customer
     const order = await db
       .collection(ORDERS_COLLECTION)
       .findOne({ _id: new ObjectId(id) });
 
-    const result = await db
-      .collection(ORDERS_COLLECTION)
-      .updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+    if (!order) {
+      return res.status(404).send({ error: "Order not found" });
+    }
+
+    const nextStatus = normalizeStatus(status);
+
+    const result = await db.collection(ORDERS_COLLECTION).updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          status: nextStatus,
+          updatedAt: new Date(),
+        },
+        $push: {
+          statusHistory: {
+            status: nextStatus,
+            label: nextStatus,
+            updatedAt: new Date(),
+          },
+        },
+      },
+    );
 
     // Send notification to the buyer about the status update
     if (order && req.io) {
@@ -565,9 +600,9 @@ router.patch("/:id", async (req, res) => {
         const notification = {
           email: buyerEmail,
           type: "order_status",
-          title: `Order ${status}`,
-          message: `Your order for ${order.productName || "your item"} has been updated to "${status}".`,
-          meta: { orderId: id, status },
+          title: `Order ${nextStatus}`,
+          message: `Your order for ${order.productName || "your item"} has been updated to "${nextStatus}".`,
+          meta: { orderId: id, status: nextStatus },
           read: false,
           createdAt: new Date(),
         };
@@ -578,13 +613,16 @@ router.patch("/:id", async (req, res) => {
 
       // Also notify seller if status is relevant (e.g., Delivered)
       const sellerEmail = order.sellerEmail;
-      if (sellerEmail && (status === "Delivered" || status === "Cancelled")) {
+      if (
+        sellerEmail &&
+        (nextStatus === "delivered" || nextStatus === "cancelled")
+      ) {
         const sellerNotif = {
           email: sellerEmail,
           type: "order_status",
-          title: `Order ${status}`,
-          message: `Order for ${order.productName || "an item"} from ${order.customerName || order.customerEmail} is now "${status}".`,
-          meta: { orderId: id, status },
+          title: `Order ${nextStatus}`,
+          message: `Order for ${order.productName || "an item"} from ${order.customerName || order.customerEmail} is now "${nextStatus}".`,
+          meta: { orderId: id, status: nextStatus },
           read: false,
           createdAt: new Date(),
         };
@@ -594,7 +632,10 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
-    res.send(result);
+    res.send({
+      result,
+      status: nextStatus,
+    });
   } catch (error) {
     res.status(500).send({ error: "Failed to update order" });
   }
