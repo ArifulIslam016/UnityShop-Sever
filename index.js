@@ -46,7 +46,7 @@ async function connectToDatabase() {
   if (!connectionPromise) {
     connectionPromise = client.connect().then(() => {
       console.log("Successfully connected to MongoDB!");
-      runAuctionCheck(client); // Start the scheduled task for auction checks
+      // runAuctionCheck(client);
       return client;
     });
   }
@@ -74,14 +74,8 @@ const productRoutes = require("./routes/product");
 const cartRoutes = require("./routes/cart");
 const authRoutes = require("./routes/auth");
 const ordersRoutes = require("./routes/orders");
-<<<<<<< HEAD
 const adminStatsRoutes = require("./routes/adminStats");
 
-=======
-const promoRoutes = require("./routes/promo");
-const runAuctionCheck = require("./routes/scheduledTask");
-// Root endpoint
->>>>>>> develop
 app.get("/", (req, res) => {
   res.send("Welcome to the UnityShop API!");
 });
@@ -101,14 +95,7 @@ app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
 app.use("/seller-requests", require("./routes/sellerRequests"));
 app.use("/group-buy", require("./routes/groupBuy"));
-<<<<<<< HEAD
 app.use("/api/admin/stats", adminStatsRoutes);
-=======
-app.use("/promo", promoRoutes);
-app.use("/reviews", require("./routes/reviews"));
-app.use("/bids", require("./routes/bids"));
-// app.use('/scheduled-tasks', require('./routes/scheduledTask'));
->>>>>>> develop
 
 // 🚀 AI Routes
 const aiRoutes = require("./routes/ai");
