@@ -71,7 +71,7 @@ async function searchProducts(db, params) {
   return products;
 }
 
-// ========== Product description generator (unchanged) ==========
+// ========== Product description generator (unchanged) =========
 router.post("/generate-description", auth, async (req, res) => {
   try {
     const { name, category, brand, price, imageUrl } = req.body;
