@@ -4,29 +4,31 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const { ObjectId } = require("mongodb");
 const multer = require("multer");
-const Replicate = require("replicate");
+const { GoogleGenAI } = require("@google/genai");
 const cloudinary = require("cloudinary").v2;
 
+// Setup file upload
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+// Cloudinary configuration
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-});
+// Gemini client
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
+// In-memory cache for product descriptions (1 hour)
 const cache = new Map();
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const CACHE_TTL = 60 * 60 * 1000;
 
-// Helper: Search products using MongoDB
+// ========== Helper: Search products in MongoDB ==========
 async function searchProducts(db, params) {
   const {
     category,
@@ -85,83 +87,64 @@ router.post("/generate-description", auth, async (req, res) => {
     }
 
     const prompt = `
-You are an expert e-commerce copywriter. Generate a compelling, SEO-friendly product description as clean HTML code only. Do not include any markdown, code fences, or surrounding text.
+You are an expert e‑commerce copywriter. Generate a compelling, SEO‑friendly product description as clean HTML code only. Do not include any markdown, code fences, or surrounding text.
 
 Product Name: ${name}
 Category: ${category || "Not specified"}
 Brand: ${brand || "Not specified"}
 
 Requirements:
-- Total length: 100-150 words.
+- Total length: 100–150 words.
 - Use a friendly, persuasive tone. Avoid generic phrases. Highlight what makes this product special.
 - Do NOT mention price or image.
 - Format the description using only HTML tags: <p> for paragraphs, <strong> for section titles (e.g., "Key Features", "Benefits", "Why Choose This Product"), <ul> and <li> for bullet points. Use <br> sparingly for line breaks.
 - Include relevant keywords naturally (product name, category, brand) for SEO.
 
-Example output structure:
-<strong>Key Features</strong>
-<ul>
-<li>Feature one</li>
-<li>Feature two</li>
-<li>Feature three</li>
-</ul>
-<strong>Benefits</strong>
-<p>Benefit description...</p>
-<strong>Why Choose This Product</strong>
-<p>Unique selling point...</p>
-<p>Closing persuasive paragraph.</p>
-
 Now generate only the HTML code (no other text).
 `;
 
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        maxOutputTokens: 500,
+        temperature: 0.5,
       },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 500,
-        temperature: 0.7,
-      }),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error("Groq API error:", errorData);
-      throw new Error(errorData.error?.message || "Groq API error");
-    }
-
-    const data = await response.json();
-    const description = data.choices[0].message.content.trim();
-
+    const description = response.text;
     cache.set(cacheKey, { description, timestamp: Date.now() });
     res.json({ success: true, description });
   } catch (error) {
     console.error("Description generation error:", error);
-    let errorMessage = "Failed to generate description";
-    if (error.message.includes("rate limit")) {
-      errorMessage = "AI service is busy (rate limit). Please try again later.";
-    } else {
-      errorMessage = error.message;
-    }
-    res.status(500).json({ error: errorMessage });
+    res.status(500).json({ error: "Failed to generate description" });
   }
 });
 
+// ========== Health Check ==========
 router.get("/test", (req, res) => {
   res.json({ message: "AI route is working!" });
 });
 
-// ========== Enhanced Support Endpoint ==========
+// ========== AI Support Chatbot ==========
 router.post("/support", auth, async (req, res) => {
   try {
     const { message, orderId, productId, userId } = req.body;
     if (!message) return res.status(400).json({ error: "Message is required" });
 
     const db = req.dbclient.db("UnityShopDB");
+    const siteUrl = "https://unity-shop-three.vercel.app";
+
+    // Site‑wide context
+    const siteContext = `
+UnityShop (${siteUrl}) is an e‑commerce platform offering electronics, fashion, home & living, and more.
+- Free shipping on orders over 500 BDT.
+- Payment via bKash, Nagad, credit cards.
+- 7‑day easy return policy.
+- 100% original product guarantee.
+- Fast delivery across Bangladesh.
+- Current promotions: Eid ul‑Adha 2025 up to 50% off, Flash Sale live, Smartphone fest.
+    `;
 
     // Step 1: Intent analysis
     const intentPrompt = `
@@ -182,25 +165,18 @@ Only output the JSON, no other text.
 User message: "${message}"
 `;
 
-    const intentResponse = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: intentPrompt }],
-        max_tokens: 250,
+    const intentResponse = await ai.models.generateContent({
+      model: "gemini-3.1-flash",
+      contents: [{ role: "user", parts: [{ text: intentPrompt }] }],
+      config: {
+        maxOutputTokens: 250,
         temperature: 0,
-      }),
+      },
     });
 
-    if (!intentResponse.ok) throw new Error("Intent analysis failed");
-    const intentData = await intentResponse.json();
     let parsed;
     try {
-      parsed = JSON.parse(intentData.choices[0].message.content.trim());
+      parsed = JSON.parse(intentResponse.text);
     } catch (e) {
       parsed = {
         intent: "general",
@@ -225,55 +201,37 @@ User message: "${message}"
       products = await searchProducts(db, searchParams);
     }
 
-    // Step 3: Build context for the AI
-    let context = "";
+    // Step 3: Build product info (including stock)
     let productListText = "";
     if (products.length > 0) {
       productListText = products
-        .map((p) => `- ${p.name} ($${p.price})`)
+        .map(
+          (p) =>
+            `- ${p.name} (${p.stock > 0 ? `in stock, ${p.stock} left` : "out of stock"}) – ${p.price} BDT.`,
+        )
         .join("\n");
-      context = `We found these products:\n${productListText}`;
-    } else if (productId) {
-      const product = await db
-        .collection("products")
-        .findOne({ _id: new ObjectId(productId) });
-      if (product)
-        context = `Product: ${product.name}, Category: ${product.category}, Price: $${product.price}`;
-    } else if (orderId && req.user) {
-      const order = await db
-        .collection("orders")
-        .findOne({ _id: new ObjectId(orderId), userId: req.user._id });
-      if (order)
-        context = `Order ID: ${order._id}, Status: ${order.status}, Total: $${order.total}`;
     }
 
     // Step 4: Generate final answer
     const finalPrompt = `
 You are a helpful shopping assistant for UnityShop.
-${context ? `Relevant information:\n${context}` : ""}
+${siteContext}
+${productListText ? `We found these products matching the user's request:\n${productListText}` : ""}
 The user's original message: "${message}"
-Write a friendly, concise reply. If products were found, briefly describe them. If no products found, suggest refining the search. Keep it under 150 words.
+Write a friendly, concise reply. If products were found, briefly describe them and mention stock availability. If no products found, suggest refining the search or ask for more details. Keep it under 150 words.
 `;
 
-    const finalResponse = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+    const finalResponse = await ai.models.generateContent({
+      model: "gemini-3.1-flash",
+      contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+      config: {
+        maxOutputTokens: 300,
+        temperature: 0.5,
       },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: finalPrompt }],
-        max_tokens: 300,
-        temperature: 0.7,
-      }),
     });
 
-    if (!finalResponse.ok) throw new Error("Final response generation failed");
-    const finalData = await finalResponse.json();
-    const reply = finalData.choices[0].message.content.trim();
+    const reply = finalResponse.text;
 
-    // Return both message and products
     res.json({
       success: true,
       message: reply,
@@ -283,6 +241,8 @@ Write a friendly, concise reply. If products were found, briefly describe them. 
         price: p.price,
         image: Array.isArray(p.image) ? p.image[0] : p.image,
         url: `/products/${p._id}`,
+        stock: p.stock,
+        inStock: p.stock > 0,
       })),
     });
   } catch (error) {
@@ -291,7 +251,7 @@ Write a friendly, concise reply. If products were found, briefly describe them. 
   }
 });
 
-// ========== Image Enhancement Endpoint =============
+// ========== Image Enhancement (Nano Banana) ==========
 router.post(
   "/enhance-product-image",
   auth,
@@ -303,42 +263,57 @@ router.post(
       }
 
       const { style } = req.body;
-      const imageBuffer = req.file.buffer;
-      const base64Image = imageBuffer.toString("base64");
-      const dataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+      const imageBase64 = req.file.buffer.toString("base64");
+      const mimeType = req.file.mimetype;
 
-      // 1) Remove background with Replicate (rembg)
-      console.log("Removing background...");
-      const output = await replicate.run(
-        "cjwbw/rembg:fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003",
-        {
-          input: { image: dataUrl },
-        },
-      );
+      const stylePrompts = {
+        professional:
+          "Remove the background and replace with a clean white studio background. Add soft, professional product lighting and subtle shadows. Enhance colors naturally.",
+        clean:
+          "Remove background completely. Pure white background. Adjust brightness and contrast for a clean, sharp product image.",
+        luxury:
+          "Remove background. Replace with elegant dark gradient background. Add dramatic lighting, rich contrast, and premium product styling. Upscale to high resolution.",
+        minimal:
+          "Remove background. Replace with soft light gray background. Add subtle shadows. Keep the image simple, clean, and modern.",
+      };
 
-      const bgRemovedUrl = Array.isArray(output) ? output[0] : output;
+      const prompt = stylePrompts[style] || stylePrompts.professional;
 
-      // 2) Optional upscale for luxury style
-      let finalImageUrl = bgRemovedUrl;
-      if (style === "luxury") {
-        console.log("Upscaling image...");
-        const upscaleOutput = await replicate.run(
-          "tencentarc/gfpgan:9283608cc6b7be6b65a8e46f1221b8b4551b6da5a814173b9fef106c3d695040",
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-image-preview", // Nano Banana
+        contents: [
           {
-            input: {
-              img: bgRemovedUrl,
-              scale: 2,
-            },
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType,
+                  data: imageBase64,
+                },
+              },
+            ],
           },
-        );
-        finalImageUrl = Array.isArray(upscaleOutput)
-          ? upscaleOutput[0]
-          : upscaleOutput;
+        ],
+        config: {
+          responseModalities: ["TEXT", "IMAGE"],
+        },
+      });
+
+      let enhancedImageBase64 = null;
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData && part.inlineData.mimeType?.startsWith("image/")) {
+          enhancedImageBase64 = part.inlineData.data;
+          break;
+        }
       }
 
-      // 3) Upload to Cloudinary
-      console.log("Uploading to Cloudinary...");
-      const uploadResult = await cloudinary.uploader.upload(finalImageUrl, {
+      if (!enhancedImageBase64) {
+        throw new Error("No image generated by the model");
+      }
+
+      // Upload to Cloudinary
+      const dataUrl = `data:image/png;base64,${enhancedImageBase64}`;
+      const uploadResult = await cloudinary.uploader.upload(dataUrl, {
         folder: "enhanced_products",
         transformation: [
           { width: 1000, height: 1000, crop: "limit" },
@@ -352,7 +327,9 @@ router.post(
       });
     } catch (error) {
       console.error("Image enhancement error:", error);
-      res.status(500).json({ error: "Failed to enhance image" });
+      res
+        .status(500)
+        .json({ error: error.message || "Failed to enhance image" });
     }
   },
 );
