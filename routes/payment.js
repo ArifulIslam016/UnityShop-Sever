@@ -9,7 +9,7 @@ function generateTracingId() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-// ─── Helper: calculate estimated delivery (5 days from now) ───
+// ─── Helper: calculate estimated delivery (5 days from no) ───
 function calculateEstimatedDelivery() {
   const date = new Date();
   date.setDate(date.getDate() + 5);
