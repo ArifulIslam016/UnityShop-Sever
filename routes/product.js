@@ -5,7 +5,7 @@ const router = express.Router();
 const DB_NAME = "UnityShopDB";
 const COLLECTION_NAME = "products";
 
-// Get all categories with product counts
+// Get all categories with product count
 router.get("/categories", async (req, res) => {
   try {
     const categories = await req.dbclient
