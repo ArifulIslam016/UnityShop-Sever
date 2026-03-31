@@ -80,8 +80,10 @@ router.post("/register", async (req, res) => {
           <div style="max-width: 600px; margin: 0 auto; font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; padding: 0;">
             <!-- Header -->
             <div style="background: linear-gradient(135deg, #6366f1, #4f46e5); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
-              <h1 style="color: #fff; margin: 0; font-size: 28px; letter-spacing: 1px;">🛍️ UnityShop</h1>
-              <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Welcome to your favorite shopping destination!</p>
+<img src="https://i.ibb.co.com/nNVbtQRs/Gemini-Generated-Image-7tbjax7tbjax7tbj-removebg-preview.png" 
+     alt="UnityShop" 
+     style="height: 50px; width: auto; display: block; margin: 0 auto 12px;" />
+<h1 style="color: #fff; margin: 0; font-size: 28px; letter-spacing: 1px;">UnityShop</h1>              <p style="color: rgba(255,255,255,0.85); margin: 8px 0 0; font-size: 14px;">Welcome to your favorite shopping destination!</p>
             </div>
 
             <!-- Body -->

@@ -78,7 +78,7 @@ async function searchProducts(db, params) {
   return products;
 }
 
-// ========== 1. Product Description Generator (Groq) ==========
+// ========== Product description generator (unchanged) =========
 router.post("/generate-description", auth, async (req, res) => {
   try {
     const { name, category, brand, price, imageUrl } = req.body;
