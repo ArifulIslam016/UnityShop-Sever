@@ -1,15 +1,15 @@
 const express = require("express");
 const router = express.Router();
-require('dotenv').config();
-const crypto = require('crypto');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const { ObjectId } = require('mongodb');
+require("dotenv").config();
+const crypto = require("crypto");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { ObjectId } = require("mongodb");
 
 function generateTracingId() {
   return crypto.randomBytes(16).toString("hex");
 }
 
-// ─── Helper: calculate estimated delivery (5 days from now) ───
+// ─── Helper: calculate estimated delivery (5 days from no) ───
 function calculateEstimatedDelivery() {
   const date = new Date();
   date.setDate(date.getDate() + 5);
@@ -29,20 +29,31 @@ router.post("/create-checkout-session", async (req, res) => {
     shippingAddress,
     phoneNumber,
     breakdown,
+    items,
   } = req.body;
+
+  const metadataItems = Array.isArray(items)
+    ? items
+        .map((item) => ({
+          productId: item?.productId || item?.id,
+          quantity: Number(item?.quantity) || 1,
+        }))
+        .filter((item) => item.productId)
+    : [];
 
   const metadataObject = {
     productId: productId,
     productName: productName,
     sellerName: sellerName,
     sellerEmail: sellerEmail,
-    userId: userId || '',
+    userId: userId || "",
     paidAmount: parseInt(price * quantity),
-    quantity:quantity,
+    quantity: quantity,
     paidAt: new Date().toISOString(),
-    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : '{}',
-    phoneNumber: phoneNumber || '',
-    breakdown: breakdown ? JSON.stringify(breakdown) : '{}',
+    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : "{}",
+    phoneNumber: phoneNumber || "",
+    breakdown: breakdown ? JSON.stringify(breakdown) : "{}",
+    items: metadataItems.length ? JSON.stringify(metadataItems) : "",
   };
 
   // Construct line items based on breakdown if available
@@ -51,7 +62,7 @@ router.post("/create-checkout-session", async (req, res) => {
     // Product Price
     line_items.push({
       price_data: {
-        currency: 'USD',
+        currency: "USD",
         unit_amount: parseInt(breakdown.subtotal * 100), // Base product cost
         product_data: {
           name: productName,
@@ -64,8 +75,8 @@ router.post("/create-checkout-session", async (req, res) => {
     if (breakdown.shipping > 0) {
       line_items.push({
         price_data: {
-          currency: 'USD',
-          product_data: { name: 'International Shipping' },
+          currency: "USD",
+          product_data: { name: "International Shipping" },
           unit_amount: parseInt(breakdown.shipping * 100),
         },
         quantity: 1,
@@ -75,8 +86,8 @@ router.post("/create-checkout-session", async (req, res) => {
     if (breakdown.customs > 0) {
       line_items.push({
         price_data: {
-          currency: 'USD',
-          product_data: { name: 'Est. Customs & Duty' },
+          currency: "USD",
+          product_data: { name: "Est. Customs & Duty" },
           unit_amount: parseInt(breakdown.customs * 100),
         },
         quantity: 1,
@@ -86,8 +97,8 @@ router.post("/create-checkout-session", async (req, res) => {
     if (breakdown.platform > 0) {
       line_items.push({
         price_data: {
-          currency: 'USD',
-          product_data: { name: 'Platform Fee' },
+          currency: "USD",
+          product_data: { name: "Platform Fee" },
           unit_amount: parseInt(breakdown.platform * 100),
         },
         quantity: 1,
@@ -151,6 +162,28 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     // ─────────────────────────────────────────────────────────
     // ORDER DATA — tracking fields added here
     // ─────────────────────────────────────────────────────────
+    const paidAmount = Number(metadata.paidAmount) || 0;
+    let parsedItems = [];
+    if (metadata.items) {
+      try {
+        const parsed = JSON.parse(metadata.items);
+        if (Array.isArray(parsed)) parsedItems = parsed;
+      } catch (err) {
+        parsedItems = [];
+      }
+    }
+    const itemsTotalQuantity = parsedItems.reduce(
+      (sum, item) => sum + (Number(item?.quantity) || 0),
+      0,
+    );
+    const computedQuantity = Math.max(
+      1,
+      itemsTotalQuantity > 0
+        ? itemsTotalQuantity
+        : amountpaid > 0
+          ? Math.round(paidAmount / amountpaid)
+          : 1,
+    );
     const orderData = {
       amountPaid: amountpaid,
       customerEmail,
@@ -160,7 +193,7 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       productName: metadata.productName,
       sellerName: metadata.sellerName,
       sellerEmail: metadata.sellerEmail,
-      quantity: Number(metadata.paidAmount) / Number(amountpaid) || 1,
+      quantity: computedQuantity,
       paymentStatus,
 
       // ── Order Tracking Fields (NEW) ────────────────────────
@@ -195,47 +228,55 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
     //     { $inc: { stock: -parseInt(session.metadata.quantity) } }, // Database-er stock theke minus hobe
     //   );
 
-// ১. আইডি এবং কোয়ান্টিটি আগে ভেরিয়েবলে নিন
-const targetProductId = session.metadata.productId;
-const buyQuantity = parseInt(session.metadata.quantity) || 1; 
+    const db = req.dbclient.db("UnityShopDB");
+    const productsCollection = db.collection("products");
 
-// console.log("Checking for Product ID:", targetProductId);
-// console.log("Quantity to reduce:", buyQuantity);
+    const updateStockForProduct = async (productIdValue, quantityValue) => {
+      const productIdFilters = [];
+      if (ObjectId.isValid(productIdValue)) {
+        productIdFilters.push({ _id: new ObjectId(productIdValue) });
+      }
+      productIdFilters.push({ _id: productIdValue });
+      productIdFilters.push({ productId: productIdValue });
+      productIdFilters.push({ id: productIdValue });
 
-try {
-  // ২. আপডেট অপারেশন
-  const updateResult = await req.dbclient
-    .db("UnityShopDB")
-    .collection("products")
-    .updateOne(
-      { _id: new ObjectId(targetProductId) }, 
-      { $inc: { stock: -buyQuantity } } 
-    );
+      await productsCollection.updateOne(
+        { $or: productIdFilters },
+        { $inc: { stock: -quantityValue } },
+      );
+    };
 
-  // ৩. চেক করা আপডেট হলো কি না
-  if (updateResult.modifiedCount > 0) {
-    // console.log("stock reduced");
-  } else {
-    // console.log("No stockupdated. Check if Product ID exists and quantity is valid.");
-  }
-} catch (dbError) {
-  // console.error("🛑 dbError.message);
-}
+    try {
+      if (parsedItems.length > 0) {
+        for (const item of parsedItems) {
+          const itemProductId = item?.productId || item?.id;
+          const parsedQty = parseInt(item?.quantity, 10);
+          const itemQuantity =
+            Number.isFinite(parsedQty) && parsedQty > 0 ? parsedQty : 1;
+          if (!itemProductId) continue;
+          await updateStockForProduct(itemProductId, itemQuantity);
+        }
+      } else {
+        const targetProductId = session.metadata.productId;
+        const parsedMetaQty = parseInt(session.metadata.quantity, 10);
+        const buyQuantity =
+          Number.isFinite(parsedMetaQty) && parsedMetaQty > 0
+            ? parsedMetaQty
+            : computedQuantity;
+        await updateStockForProduct(targetProductId, buyQuantity);
+      }
+    } catch (dbError) {
+      console.error("[Payment] stock update failed", dbError.message);
+    }
 
-
-
-// jjjjjjjjjjjjjjjjjjjjjjjjjjjj
-
-
-
-
+    // jjjjjjjjjjjjjjjjjjjjjjjjjjjj
 
     // ─── BACKEND CART CLEARING (Redundancy if frontend fails) ───────────────
     // If userId is provided in metadata, clear all the purchased items from cart
     if (metadata.userId && metadata.productId) {
       try {
         const userId = metadata.userId;
-        const productIds = metadata.productId.split(',').map(id => id.trim());
+        const productIds = metadata.productId.split(",").map((id) => id.trim());
 
         // Extract product IDs (they might be comma-separated)
         // Clear each product from the user's cart
@@ -243,8 +284,8 @@ try {
           try {
             const objectId = new ObjectId(prodId);
             await req.dbclient
-              .db('UnityShopDB')
-              .collection('carts')
+              .db("UnityShopDB")
+              .collection("carts")
               .updateOne(
                 { userId: new ObjectId(userId) },
                 { $pull: { items: { productId: objectId } } },
@@ -260,7 +301,7 @@ try {
           }
         }
       } catch (err) {
-        console.error('[Payment] Error clearing cart from backend:', err);
+        console.error("[Payment] Error clearing cart from backend:", err);
         // Don't fail the order for this
       }
     }
