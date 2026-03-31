@@ -31,7 +31,7 @@ router.post("/create-checkout-session", async (req, res) => {
     breakdown,
     items,
   } = req.body;
-
+// console.log("shipping address ", shippingAddress);
   const metadataItems = Array.isArray(items)
     ? items
         .map((item) => ({
@@ -184,6 +184,16 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
           ? Math.round(paidAmount / amountpaid)
           : 1,
     );
+
+    let parsedShippingAddress = {};
+    if (metadata.shippingAddress) {
+      try {
+        parsedShippingAddress = JSON.parse(metadata.shippingAddress);
+      } catch (e) {}
+    }
+
+    const unassignedBreakdown = metadata.breakdown ? JSON.parse(metadata.breakdown) : {};
+
     const orderData = {
       amountPaid: amountpaid,
       customerEmail,
@@ -195,6 +205,14 @@ router.patch("/retrivedsessionAfterPayment", async (req, res) => {
       sellerEmail: metadata.sellerEmail,
       quantity: computedQuantity,
       paymentStatus,
+      phoneNumber: metadata.phoneNumber || "",
+      shippingAddress: parsedShippingAddress,
+      shippingSnapshot: {
+        type: unassignedBreakdown.shipping > 0 ? "Paid" : "Free",
+        method: "Standard",
+        cost: unassignedBreakdown.shipping || 0,
+        estimatedDays: 5
+      },
 
       // ── Order Tracking Fields (NEW) ────────────────────────
       status: "New",

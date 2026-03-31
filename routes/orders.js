@@ -53,6 +53,7 @@ router.get("/my-deliveries/:userId", async (req, res) => {
       .db(DB_NAME)
       .collection(ORDERS_COLLECTION)
       .find({ deliveryManId: userId })
+      .sort({ assignedAt: -1, createdAt: -1 })
       .toArray();
     res.send(orders);
   } catch (error) {
