@@ -99,6 +99,8 @@ app.use("/cart", cartRoutes);
 app.use("/notifications", require("./routes/notifications"));
 app.use("/upload", require("./routes/upload"));
 app.use("/seller-requests", require("./routes/sellerRequests"));
+app.use("/delivery-requests", require("./routes/deliveryRequests"));
+app.use("/wishlist", require("./routes/wishlist"));
 app.use("/group-buy", require("./routes/groupBuy"));
 app.use("/promo", promoRoutes);
 app.use("/reviews", require("./routes/reviews"));
