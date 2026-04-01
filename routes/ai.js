@@ -102,6 +102,7 @@ Requirements:
 - Total length: 100–150 words.
 - Use a friendly, persuasive tone. Avoid generic phrases. Highlight what makes this product special.
 - Do NOT mention price or image.
+- Do NOT generate or include any tags, hashtags, or keywords sections at the end.
 - Format the description using only HTML tags: <p> for paragraphs, <strong> for section titles (e.g., "Key Features", "Benefits", "Why Choose This Product"), <ul> and <li> for bullet points. Use <br> sparingly for line breaks.
 - Include relevant keywords naturally (product name, category, brand) for SEO.
 
