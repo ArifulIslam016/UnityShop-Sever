@@ -31,7 +31,7 @@ router.post("/create-checkout-session", async (req, res) => {
     breakdown,
     items,
   } = req.body;
-// console.log("shipping address ", shippingAddress);
+// console.log("shipping address ", shippingAddres);
   const metadataItems = Array.isArray(items)
     ? items
         .map((item) => ({
