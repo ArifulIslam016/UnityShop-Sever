@@ -151,6 +151,8 @@ router.get("/search", async (req, res) => {
       priceMin = "",
       priceMax = "",
       rating = "0",
+      brand = "",
+      seller = "",
     } = req.query;
 
     const pageNum = Math.max(parseInt(page) || 1, 1);
@@ -191,6 +193,14 @@ router.get("/search", async (req, res) => {
 
     if (category && category.trim()) {
       matchQuery.category = { $regex: `^${category.trim()}$`, $options: "i" };
+    }
+
+    if (brand && brand.trim()) {
+      matchQuery.brand = { $regex: `^${brand.trim()}$`, $options: "i" };
+    }
+
+    if (seller && seller.trim()) {
+      matchQuery.sellerEmail = seller.trim();
     }
 
     if (priceMin || priceMax) {
