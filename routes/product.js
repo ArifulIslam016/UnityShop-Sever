@@ -153,6 +153,7 @@ router.get("/search", async (req, res) => {
       rating = "0",
       brand = "",
       seller = "",
+      sellerName = "",
     } = req.query;
 
     const pageNum = Math.max(parseInt(page) || 1, 1);
@@ -201,6 +202,13 @@ router.get("/search", async (req, res) => {
 
     if (seller && seller.trim()) {
       matchQuery.sellerEmail = seller.trim();
+    }
+
+    if (sellerName && sellerName.trim()) {
+      matchQuery.sellerName = {
+        $regex: `^${sellerName.trim()}$`,
+        $options: "i",
+      };
     }
 
     if (priceMin || priceMax) {
